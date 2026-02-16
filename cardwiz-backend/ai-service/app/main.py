@@ -1,18 +1,31 @@
 from fastapi import FastAPI
-from app.routes import document_routes, recommendation_routes
-from py_eureka_client import eureka_client
+from contextlib import asynccontextmanager
+from app.config import settings
+from app.db import init_db
+from app.dependencies import init_eureka, stop_eureka
+from app.routes import document_routes, recommendation_routes, embedding_routes
 
-app = FastAPI(title="CardWiz AI Service")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Ensure vector table/index metadata exists
+    init_db()
+    # Startup: Register with Eureka
+    await init_eureka()
+    yield
+    # Shutdown: Cleanly deregister
+    await stop_eureka()
 
-app.include_router(document_routes.router)
-app.include_router(recommendation_routes.router)
+app = FastAPI(
+    title="CardWiz AI Service",
+    description="Intelligence layer for multimodal reward extraction",
+    lifespan=lifespan
+)
+
+# Include Routers
+app.include_router(document_routes.router, prefix="/ai/v1/documents", tags=["Documents"])
+app.include_router(recommendation_routes.router, prefix="/ai/v1/recommend", tags=["Recommendations"])
+app.include_router(embedding_routes.router, prefix="/ai/v1/embeddings", tags=["Embeddings"])
 
 @app.get("/health")
-def health():
-    return {"status": "AI Service Running"}
-
-eureka_client.init(
-    eureka_server="http://service-registry:8761/eureka",
-    app_name="ai-service",
-    instance_port=8000
-)
+async def health_check():
+    return {"status": "UP", "service": settings.APP_NAME}

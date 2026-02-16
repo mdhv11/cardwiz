@@ -40,9 +40,11 @@ public class ImageUploadService {
 
     // Image constraints
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
+    private static final long MAX_DOCUMENT_SIZE = 20 * 1024 * 1024; // 20MB
     private static final int MAX_WIDTH = 400;
     private static final int MAX_HEIGHT = 400;
     private static final String[] ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"};
+    private static final String[] ALLOWED_DOCUMENT_EXTENSIONS = {"jpg", "jpeg", "png", "pdf", "webp"};
 
     /**
      * Upload user profile image to S3
@@ -78,6 +80,40 @@ public class ImageUploadService {
             log.error("Error uploading image to S3 for user {}: {}", userId, e.getMessage(), e);
             throw new RuntimeException("Failed to upload image to S3: " + e.getMessage());
         }
+    }
+
+    public String uploadDocument(MultipartFile file, Long userId) {
+        if (!s3Enabled) {
+            throw new RuntimeException("S3 is not enabled.");
+        }
+        validateDocument(file);
+
+        try {
+            String originalFilename = file.getOriginalFilename();
+            if (originalFilename == null) {
+                originalFilename = "document";
+            }
+            String key = generateDocumentFilename(userId, originalFilename);
+
+            PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(key)
+                    .contentType(file.getContentType() != null ? file.getContentType() : "application/octet-stream")
+                    .build();
+
+            s3Client.putObject(putObjectRequest, RequestBody.fromBytes(file.getBytes()));
+            return key;
+        } catch (IOException e) {
+            log.error("Error reading document for user {}: {}", userId, e.getMessage());
+            throw new RuntimeException("Failed to process document");
+        } catch (Exception e) {
+            log.error("Error uploading document to S3 for user {}: {}", userId, e.getMessage(), e);
+            throw new RuntimeException("Failed to upload document to S3: " + e.getMessage());
+        }
+    }
+
+    public String getBucketName() {
+        return bucketName;
     }
 
     /**
@@ -121,6 +157,31 @@ public class ImageUploadService {
             }
         }
         return false;
+    }
+
+    private boolean isAllowedDocumentExtension(String filename) {
+        String extension = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
+        for (String allowed : ALLOWED_DOCUMENT_EXTENSIONS) {
+            if (extension.equals(allowed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void validateDocument(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File is empty");
+        }
+        if (file.getSize() > MAX_DOCUMENT_SIZE) {
+            throw new IllegalArgumentException(
+                    String.format("Document size exceeds maximum of %d MB", MAX_DOCUMENT_SIZE / (1024 * 1024))
+            );
+        }
+        String filename = file.getOriginalFilename();
+        if (filename == null || !isAllowedDocumentExtension(filename)) {
+            throw new IllegalArgumentException("Invalid document type. Allowed: jpg, jpeg, png, webp, pdf");
+        }
     }
 
     /**
@@ -195,6 +256,11 @@ public class ImageUploadService {
     private String generateFilename(Long userId, String originalFilename) {
         String extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         return String.format("profile-images/%d/%s%s", userId, UUID.randomUUID(), extension);
+    }
+
+    private String generateDocumentFilename(Long userId, String originalFilename) {
+        String extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+        return String.format("documents/%d/%s%s", userId, UUID.randomUUID(), extension);
     }
 
     /**

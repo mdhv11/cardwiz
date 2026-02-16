@@ -8,8 +8,8 @@ import java.util.List;
 @Builder
 public class UserResponseDTO {
     private String id;
-    private String name;
-    private String username;
     private String email;
-    private String profileImageURL;
+    private String firstName;
+    private String lastName;
+    private String profileImageUrl;
 }

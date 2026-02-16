@@ -5,6 +5,7 @@ import com.cardwiz.userservice.dtos.Auth.AuthenticationResponse;
 import com.cardwiz.userservice.dtos.Auth.RegisterRequest;
 import com.cardwiz.userservice.models.User;
 import com.cardwiz.userservice.repositories.UserRepository;
+import com.cardwiz.userservice.models.UserRole;
 import com.cardwiz.userservice.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -24,21 +25,17 @@ public class AuthService {
 
     public AuthenticationResponse register(RegisterRequest request) {
         // 1. Check if user exists
-        if (userRepository.existsByUsername(request.getUsername())) {
-            throw new RuntimeException("Username already taken");
-        }
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new RuntimeException("Email already registered");
         }
 
         // 2. Create User
         var user = new User();
-        user.setName(request.getName());
-        user.setUsername(request.getUsername());
+        user.setFirstName(request.getFirstName());
+        user.setLastName(request.getLastName());
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setUserRole(UserRole.MEMBER);
-        user.setKarma(100);
+        user.setRole(UserRole.USER);
 
         userRepository.save(user);
 
@@ -50,7 +47,7 @@ public class AuthService {
         return AuthenticationResponse.builder()
                 .token(jwtToken)
                 .userId(String.valueOf(user.getId()))
-                .username(user.getUsername())
+                .email(user.getEmail())
                 .user(userService.getUserProfile(user.getId()))
                 .build();
     }
@@ -59,12 +56,12 @@ public class AuthService {
         // 1. Authenticate using Spring Security Manager
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
-                        request.getUsername(),
+                        request.getEmail(),
                         request.getPassword()));
 
         // 2. Fetch User
-        var user = userRepository.findByUsername(request.getUsername())
-                .orElseThrow();
+        var user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new RuntimeException("Invalid credentials"));
 
         // 3. Generate Token with userId claim
         var claims = new java.util.HashMap<String, Object>();
@@ -74,7 +71,7 @@ public class AuthService {
         return AuthenticationResponse.builder()
                 .token(jwtToken)
                 .userId(String.valueOf(user.getId()))
-                .username(user.getUsername())
+                .email(user.getEmail())
                 .user(userService.getUserProfile(user.getId()))
                 .build();
     }

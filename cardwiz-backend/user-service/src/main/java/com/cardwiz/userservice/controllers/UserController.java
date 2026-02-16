@@ -1,92 +1,66 @@
 package com.cardwiz.userservice.controllers;
 
+import com.cardwiz.userservice.dtos.ChangePasswordRequest;
 import com.cardwiz.userservice.dtos.UserResponseDTO;
 import com.cardwiz.userservice.dtos.UserUpdateRequest;
-import com.cardwiz.userservice.dtos.ChangePasswordRequest;
-import com.cardwiz.userservice.services.UserService;
 import com.cardwiz.userservice.services.ImageUploadService;
+import com.cardwiz.userservice.services.UserService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 @RestController
-@RequestMapping("/api/users")
+@RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
 public class UserController {
 
     private final UserService userService;
     private final ImageUploadService imageUploadService;
 
-    @GetMapping
-    public ResponseEntity<Page<UserResponseDTO>> getAllUsers(@RequestParam(defaultValue = "0") int page,
-                                                            @RequestParam(defaultValue = "10") int size) {
-        return ResponseEntity.ok(userService.getAllUsers(page, size));
+    @GetMapping("/me")
+    public ResponseEntity<UserResponseDTO> getCurrentUser(@AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(userService.getUserProfileByEmail(userDetails.getUsername()));
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<UserResponseDTO> getUserProfile(@PathVariable Long id) {
-        return ResponseEntity.ok(userService.getUserProfile(id));
-    }
-
-    /**
-     * Update user profile information
-     * @param id User ID
-     * @param request UserUpdateRequest containing name, bio, and notification preferences
-     * @return Updated user profile
-     */
-    @PutMapping("/{id}")
-    public ResponseEntity<UserResponseDTO> updateUserProfile(
-            @PathVariable Long id,
+    @PutMapping("/me")
+    public ResponseEntity<UserResponseDTO> updateCurrentUser(
+            @AuthenticationPrincipal UserDetails userDetails,
             @RequestBody UserUpdateRequest request) {
-        return ResponseEntity.ok(userService.updateUserProfile(id, request));
+        UserResponseDTO current = userService.getUserProfileByEmail(userDetails.getUsername());
+        return ResponseEntity.ok(userService.updateUserProfile(Long.valueOf(current.getId()), request));
     }
 
-    /**
-     * Update user profile image (via file upload)
-     * Uploads image to S3 and stores object key in database
-     */
-    @PostMapping("/{id}/profile-image/upload")
-    public ResponseEntity<UserResponseDTO> uploadProfileImage(
-            @PathVariable Long id,
-            @RequestParam("file") MultipartFile file) {
-        try {
-            String imageKey = imageUploadService.uploadProfileImage(file, id);
-            return ResponseEntity.ok(userService.updateProfileImage(id, imageKey));
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid image: " + e.getMessage());
-        } catch (RuntimeException e) {
-            throw new RuntimeException("Failed to upload image: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Update user profile image using an existing S3 key (e.g., from another service)
-     */
-    @PutMapping("/{id}/profile-image")
-    public ResponseEntity<UserResponseDTO> updateProfileImage(
-            @PathVariable Long id,
-            @RequestBody String imageKey) {
-        return ResponseEntity.ok(userService.updateProfileImage(id, imageKey));
-    }
-
-    @GetMapping("/{id}/profile-image/url")
-    public ResponseEntity<String> getProfileImageUrl(@PathVariable Long id) {
-        return ResponseEntity.ok(userService.getProfileImageUrl(id));
-    }
-
-    /**
-     * Change user password
-     * @param id User ID
-     * @param request ChangePasswordRequest containing current password and new password
-     * @return 200 OK if successful
-     */
-    @PostMapping("/{id}/change-password")
+    @PostMapping("/change-password")
     public ResponseEntity<Void> changePassword(
-            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails,
             @RequestBody ChangePasswordRequest request) {
-        userService.changePassword(id, request);
+        UserResponseDTO current = userService.getUserProfileByEmail(userDetails.getUsername());
+        userService.changePassword(Long.valueOf(current.getId()), request);
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/upload-image")
+    public ResponseEntity<UserResponseDTO> uploadProfileImage(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestParam("file") MultipartFile file) {
+        UserResponseDTO current = userService.getUserProfileByEmail(userDetails.getUsername());
+        String imageKey = imageUploadService.uploadProfileImage(file, Long.valueOf(current.getId()));
+        return ResponseEntity.ok(userService.updateProfileImage(Long.valueOf(current.getId()), imageKey));
+    }
+
+    @GetMapping("/me/profile-image")
+    public ResponseEntity<String> getProfileImageUrl(@AuthenticationPrincipal UserDetails userDetails) {
+        UserResponseDTO current = userService.getUserProfileByEmail(userDetails.getUsername());
+        return ResponseEntity.ok(userService.getProfileImageUrl(Long.valueOf(current.getId())));
+    }
+
+    @DeleteMapping("/me")
+    public ResponseEntity<Void> deleteCurrentUser(@AuthenticationPrincipal UserDetails userDetails) {
+        UserResponseDTO current = userService.getUserProfileByEmail(userDetails.getUsername());
+        userService.deleteUser(Long.valueOf(current.getId()));
+        return ResponseEntity.noContent().build();
     }
 }

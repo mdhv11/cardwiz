@@ -27,7 +27,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(@NonNull HttpServletRequest request) throws ServletException {
         String path = request.getServletPath();
-        return path != null && path.startsWith("/api/auth/");
+        return path != null && path.startsWith("/api/v1/auth/");
     }
 
     @Override
@@ -41,14 +41,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // If this is a public auth endpoint, skip JWT processing entirely so
         // register/login are not blocked when an (invalid/expired) Authorization
         // header is present.
-        if (path != null && path.startsWith("/api/auth")) {
+        if (path != null && path.startsWith("/api/v1/auth")) {
             filterChain.doFilter(request, response);
             return;
         }
 
         final String authHeader = request.getHeader("Authorization");
         final String jwt;
-        final String userEmail; // or username depending on your logic
+        final String userEmail;
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);

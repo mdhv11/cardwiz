@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     VECTOR_TOP_K: int = 5
 
     class Config:
-        env_file = ".env"
+        env_file = (".env", "../.env")
 
 
 settings = Settings()

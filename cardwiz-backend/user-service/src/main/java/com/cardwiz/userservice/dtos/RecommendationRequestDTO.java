@@ -15,5 +15,7 @@ public class RecommendationRequestDTO {
     private String merchantName;
     private String category;
     private BigDecimal transactionAmount;
+    private String currency;
+    private String contextNotes;
     private List<Long> availableCardIds;
 }

@@ -31,6 +31,10 @@ public class AiResponseDTO {
         private String category;
         private Double rewardRate;
         private String rewardType;
+        private Double pointsPerUnit;
+        private Double spendUnit;
+        private Double pointValueRupees;
+        private Double effectiveRewardPercentage;
         private String conditions;
     }
 }

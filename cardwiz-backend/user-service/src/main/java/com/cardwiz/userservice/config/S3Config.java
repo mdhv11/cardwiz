@@ -74,7 +74,9 @@ public class S3Config {
             builder.credentialsProvider(DefaultCredentialsProvider.create());
         }
 
-        return builder.build();
+        return builder.
+                forcePathStyle(true)
+                .build();
     }
 
     @Bean

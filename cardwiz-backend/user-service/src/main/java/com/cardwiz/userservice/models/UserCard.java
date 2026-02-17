@@ -3,6 +3,8 @@ package com.cardwiz.userservice.models;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.Instant;
+
 @Entity
 @Table(name = "user_cards")
 @Data
@@ -24,4 +26,10 @@ public class UserCard {
 
     private String lastFourDigits;
     private boolean active = true;
+
+    @Enumerated(EnumType.STRING)
+    private DocumentStatus docStatus = DocumentStatus.NOT_UPLOADED;
+
+    private String docS3Key;
+    private Instant lastAnalyzedAt;
 }

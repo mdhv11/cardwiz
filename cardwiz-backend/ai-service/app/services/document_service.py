@@ -1,4 +1,3 @@
-import boto3
 import json
 import logging
 import re
@@ -8,6 +7,7 @@ from json import JSONDecodeError
 from pdf2image import convert_from_bytes
 
 from app.clients.bedrock_client import get_bedrock_runtime_client
+from app.clients.s3_client import get_s3_client
 from app.schemas.document_schema import NovaAnalysisResponse
 from app.config import settings
 
@@ -17,8 +17,9 @@ logger = logging.getLogger("uvicorn")
 class DocumentService:
     def __init__(self):
         self.bedrock = get_bedrock_runtime_client()
-        self.s3 = boto3.client("s3")
-        self.model_id = "us.amazon.nova-2-pro-v1:0"
+        self.s3 = get_s3_client()
+        self.model_id = "amazon.nova-pro-v1:0"
+        self.max_pdf_pages = 5
 
     def _extract_json_payload(self, output_text: str) -> str:
         text = output_text.strip()
@@ -51,46 +52,58 @@ class DocumentService:
 
         return kwargs
 
-    def _convert_pdf_first_page_to_png(self, document_bytes: bytes) -> bytes:
-        pages = convert_from_bytes(document_bytes, first_page=1, last_page=1, fmt="png")
+    def _convert_pdf_to_png_images(self, document_bytes: bytes) -> list[bytes]:
+        pages = convert_from_bytes(document_bytes, first_page=1, last_page=self.max_pdf_pages, fmt="png")
         if not pages:
             raise ValueError("PDF conversion produced no pages.")
 
-        buffer = BytesIO()
-        pages[0].save(buffer, format="PNG")
-        return buffer.getvalue()
+        images = []
+        for page in pages:
+            buffer = BytesIO()
+            page.save(buffer, format="PNG")
+            images.append(buffer.getvalue())
+        return images
 
-    def _get_png_bytes_for_nova(self, document_bytes: bytes, s3_key: str, content_type: str | None) -> bytes:
+    def _build_image_content_blocks(
+        self, document_bytes: bytes, s3_key: str, content_type: str | None
+    ) -> list[dict]:
         key_is_pdf = s3_key.lower().endswith(".pdf")
         mime_is_pdf = content_type == "application/pdf"
 
         if key_is_pdf or mime_is_pdf:
-            logger.info("Detected PDF input for %s. Converting first page to PNG.", s3_key)
-            return self._convert_pdf_first_page_to_png(document_bytes)
+            logger.info(
+                "Detected PDF input for %s. Converting up to %s pages to PNG.",
+                s3_key,
+                self.max_pdf_pages,
+            )
+            images = self._convert_pdf_to_png_images(document_bytes)
+            return [{"image": {"format": "png", "source": {"bytes": image}}} for image in images]
 
-        return document_bytes
+        return [{"image": {"format": "png", "source": {"bytes": document_bytes}}}]
 
     def _repair_json_via_nova(self, malformed_text: str) -> str:
         repair_prompt = f"""
-You returned malformed JSON in the previous response.
-Fix the JSON so it is strictly valid and return ONLY the JSON object.
-Do not add markdown, explanations, or extra keys.
+            You returned malformed JSON in the previous response.
+            Fix the JSON so it is strictly valid and return ONLY the JSON object.
+            Do not add markdown, explanations, or extra keys.
 
-Malformed output:
-{malformed_text}
-"""
+            Malformed output:
+            {malformed_text}
+            """
         repair_message = {"role": "user", "content": [{"text": repair_prompt}]}
         repair_response = self.bedrock.converse(**self._build_converse_kwargs(repair_message))
         return repair_response["output"]["message"]["content"][0]["text"]
 
-    async def analyze_document(self, s3_key: str, bucket: str, doc_id: int) -> NovaAnalysisResponse:
+    async def analyze_document(self, s3_key: str, bucket: str | None, doc_id: int) -> NovaAnalysisResponse:
+        target_bucket = bucket or settings.effective_s3_bucket
+
         # 1. Fetch source bytes from S3
-        s3_response = self.s3.get_object(Bucket=bucket, Key=s3_key)
+        s3_response = self.s3.get_object(Bucket=target_bucket, Key=s3_key)
         source_bytes = s3_response["Body"].read()
         content_type = s3_response.get("ContentType")
 
-        # 2. Convert PDF first page to PNG for Nova image input
-        image_bytes = self._get_png_bytes_for_nova(source_bytes, s3_key, content_type)
+        # 2. Convert source bytes into one or more image content blocks for Nova input
+        image_content_blocks = self._build_image_content_blocks(source_bytes, s3_key, content_type)
 
         # 3. Prepare the multimodal request for Nova 2 Pro
         prompt = """
@@ -99,18 +112,31 @@ Malformed output:
         Return ONLY a JSON object that matches this structure:
         {
           "extractedRules": [
-            {"cardName": "string", "category": "string", "rewardRate": float, "rewardType": "CASHBACK|POINTS|MILES", "conditions": "string"}
+            {
+              "cardName": "string",
+              "category": "string",
+              "rewardRate": float,
+              "rewardType": "CASHBACK|POINTS|MILES",
+              "pointsPerUnit": float|null,
+              "spendUnit": float|null,
+              "pointValueRupees": float|null,
+              "effectiveRewardPercentage": float,
+              "conditions": "string"
+            }
           ],
           "aiSummary": "A brief summary of the card's best value proposition."
         }
+
+        Normalization rules:
+        - For cashback percentages, effectiveRewardPercentage == cashback percentage.
+        - For points rules, compute effectiveRewardPercentage using:
+          pointsPerUnit * pointValueRupees / spendUnit * 100
+        - Example: 20 points per 150 spend, pointValueRupees=0.25 => 3.33
         """
 
         message = {
             "role": "user",
-            "content": [
-                {"image": {"format": "png", "source": {"bytes": image_bytes}}},
-                {"text": prompt}
-            ]
+            "content": image_content_blocks + [{"text": prompt}]
         }
 
         # 4. Call Converse API and parse response JSON with retry-on-malformed-json
@@ -125,7 +151,7 @@ Malformed output:
                 data = self._parse_model_json(repaired_text)
 
             return NovaAnalysisResponse(
-                documentMetadata={"docId": doc_id, "sourceS3": f"s3://{bucket}/{s3_key}"},
+                documentMetadata={"docId": doc_id, "sourceS3": f"s3://{target_bucket}/{s3_key}"},
                 **data
             )
 

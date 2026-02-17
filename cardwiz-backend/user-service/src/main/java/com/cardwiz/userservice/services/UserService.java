@@ -8,6 +8,9 @@ import com.cardwiz.userservice.models.User;
 import com.cardwiz.userservice.repositories.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -21,7 +24,6 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final ImageUploadService imageUploadService;
 
     public Page<UserResponseDTO> getAllUsers(int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
@@ -29,12 +31,14 @@ public class UserService {
                 .map(this::toResponse);
     }
 
+    @Cacheable(cacheNames = "userProfileByIdV2", key = "#userId")
     public UserResponseDTO getUserProfile(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
         return toResponse(user);
     }
 
+    @Cacheable(cacheNames = "userProfileByEmailV2", key = "#email")
     public UserResponseDTO getUserProfileByEmail(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -42,6 +46,7 @@ public class UserService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"userProfileByIdV2", "userProfileByEmailV2"}, allEntries = true)
     public UserResponseDTO updateUserProfile(Long userId, UserUpdateRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -57,6 +62,7 @@ public class UserService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"userProfileByIdV2", "userProfileByEmailV2"}, allEntries = true)
     public void changePassword(Long userId, ChangePasswordRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -82,25 +88,11 @@ public class UserService {
     }
 
     @Transactional
-    public UserResponseDTO updateProfileImage(Long userId, String imageKey) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new UserNotFoundException("User not found"));
-
-        if (imageKey == null || imageKey.isBlank()) {
-            throw new RuntimeException("Image key cannot be empty");
-        }
-
-        user.setProfileImageUrl(imageKey);
-        return toResponse(userRepository.save(user));
-    }
-
-    public String getProfileImageUrl(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new UserNotFoundException("User not found"));
-        return resolveProfileImageUrl(user.getProfileImageUrl());
-    }
-
-    @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"userProfileByIdV2", "userProfileByEmailV2"}, allEntries = true),
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
+    })
     public void deleteUser(Long userId) {
         if (!userRepository.existsById(userId)) {
             throw new UserNotFoundException("User not found");
@@ -114,11 +106,7 @@ public class UserService {
                 .email(user.getEmail())
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
-                .profileImageUrl(resolveProfileImageUrl(user.getProfileImageUrl()))
+                .profileImageUrl(user.getProfileImageUrl())
                 .build();
-    }
-
-    private String resolveProfileImageUrl(String imageKey) {
-        return imageUploadService.getImageUrl(imageKey);
     }
 }

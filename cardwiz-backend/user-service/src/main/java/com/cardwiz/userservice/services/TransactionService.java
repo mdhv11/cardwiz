@@ -9,6 +9,7 @@ import com.cardwiz.userservice.repositories.TransactionRepository;
 import com.cardwiz.userservice.repositories.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -36,6 +37,7 @@ public class TransactionService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     public TransactionResponse createTransaction(Long userId, TransactionRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -44,6 +46,7 @@ public class TransactionService {
                 .amount(request.getAmount())
                 .merchant(request.getMerchant())
                 .category(request.getCategory())
+                .currency(request.getCurrency())
                 .transactionDate(request.getTransactionDate())
                 .suggestedCardId(request.getSuggestedCardId())
                 .actualCardId(request.getActualCardId())
@@ -54,6 +57,7 @@ public class TransactionService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     public TransactionResponse updateTransaction(Long userId, Long transactionId, TransactionRequest request) {
         Transaction tx = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
@@ -70,6 +74,9 @@ public class TransactionService {
         if (request.getCategory() != null) {
             tx.setCategory(request.getCategory());
         }
+        if (request.getCurrency() != null) {
+            tx.setCurrency(request.getCurrency());
+        }
         if (request.getTransactionDate() != null) {
             tx.setTransactionDate(request.getTransactionDate());
         }
@@ -84,6 +91,7 @@ public class TransactionService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     public void deleteTransaction(Long userId, Long transactionId) {
         Transaction tx = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
@@ -99,6 +107,7 @@ public class TransactionService {
                 .amount(tx.getAmount())
                 .merchant(tx.getMerchant())
                 .category(tx.getCategory())
+                .currency(tx.getCurrency())
                 .transactionDate(tx.getTransactionDate())
                 .suggestedCardId(tx.getSuggestedCardId())
                 .actualCardId(tx.getActualCardId())

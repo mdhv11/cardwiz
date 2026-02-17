@@ -3,6 +3,8 @@ package com.cardwiz.userservice.services;
 import com.cardwiz.userservice.customExceptions.UserNotFoundException;
 import com.cardwiz.userservice.dtos.UserCardRequest;
 import com.cardwiz.userservice.dtos.UserCardResponse;
+import com.cardwiz.userservice.dtos.DocumentJobStatusDTO;
+import com.cardwiz.userservice.models.DocumentStatus;
 import com.cardwiz.userservice.models.ProcessingStatus;
 import com.cardwiz.userservice.models.UploadedDocument;
 import com.cardwiz.userservice.models.User;
@@ -12,8 +14,12 @@ import com.cardwiz.userservice.repositories.UserCardRepository;
 import com.cardwiz.userservice.repositories.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.List;
 
 @Service
@@ -24,12 +30,14 @@ public class CardService {
     private final UserRepository userRepository;
     private final UploadedDocumentRepository uploadedDocumentRepository;
 
+    @Cacheable(cacheNames = "cardMetadataByUserV2", key = "#userId")
     public List<UserCardResponse> getCardsForUser(Long userId) {
         return userCardRepository.findByUserId(userId).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
+    @Cacheable(cacheNames = "cardMetadataByIdV2", key = "T(java.lang.String).valueOf(#userId).concat(':').concat(T(java.lang.String).valueOf(#cardId))")
     public UserCardResponse getCard(Long userId, Long cardId) {
         UserCard card = userCardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
@@ -40,6 +48,10 @@ public class CardService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
+    })
     public UserCardResponse createCard(Long userId, UserCardRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -50,6 +62,7 @@ public class CardService {
                 .network(request.getNetwork())
                 .lastFourDigits(request.getLastFourDigits())
                 .active(request.isActive())
+                .docStatus(DocumentStatus.NOT_UPLOADED)
                 .user(user)
                 .build();
 
@@ -57,6 +70,10 @@ public class CardService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
+    })
     public UserCardResponse updateCard(Long userId, Long cardId, UserCardRequest request) {
         UserCard card = userCardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
@@ -82,6 +99,10 @@ public class CardService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
+    })
     public void deleteCard(Long userId, Long cardId) {
         UserCard card = userCardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
@@ -99,6 +120,47 @@ public class CardService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
+    })
+    public UserCard markCardDocumentProcessing(Long userId, Long cardId, String s3Key) {
+        UserCard card = userCardRepository.findById(cardId)
+                .orElseThrow(() -> new RuntimeException("Card not found"));
+        if (!card.getUser().getId().equals(userId)) {
+            throw new RuntimeException("Card does not belong to user");
+        }
+        card.setDocStatus(DocumentStatus.PROCESSING);
+        card.setDocS3Key(s3Key);
+        return userCardRepository.save(card);
+    }
+
+    @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
+    })
+    public UserCard markCardDocumentCompleted(Long cardId) {
+        UserCard card = userCardRepository.findById(cardId)
+                .orElseThrow(() -> new RuntimeException("Card not found"));
+        card.setDocStatus(DocumentStatus.COMPLETED);
+        card.setLastAnalyzedAt(Instant.now());
+        return userCardRepository.save(card);
+    }
+
+    @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
+    })
+    public UserCard markCardDocumentFailed(Long cardId) {
+        UserCard card = userCardRepository.findById(cardId)
+                .orElseThrow(() -> new RuntimeException("Card not found"));
+        card.setDocStatus(DocumentStatus.FAILED);
+        return userCardRepository.save(card);
+    }
+
+    @Transactional
     public UploadedDocument createDocumentRecord(Long userId, String s3Key, String documentType) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -113,6 +175,7 @@ public class CardService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     public UploadedDocument markDocumentComplete(Long documentId, String aiSummary) {
         UploadedDocument document = uploadedDocumentRepository.findById(documentId)
                 .orElseThrow(() -> new RuntimeException("Document record not found"));
@@ -129,6 +192,29 @@ public class CardService {
         return uploadedDocumentRepository.save(document);
     }
 
+    public DocumentJobStatusDTO getDocumentJobStatus(Long userId, Long documentId) {
+        UploadedDocument document = uploadedDocumentRepository.findByIdAndUserId(documentId, userId)
+                .orElseThrow(() -> new RuntimeException("Document job not found"));
+
+        Long cardId = null;
+        if (document.getS3Url() != null) {
+            List<UserCard> cards = userCardRepository.findByUserId(userId);
+            for (UserCard card : cards) {
+                if (document.getS3Url().equals(card.getDocS3Key())) {
+                    cardId = card.getId();
+                    break;
+                }
+            }
+        }
+
+        return DocumentJobStatusDTO.builder()
+                .documentId(document.getId())
+                .status(document.getStatus())
+                .aiSummary(document.getAiSummary())
+                .cardId(cardId)
+                .build();
+    }
+
     private UserCardResponse toResponse(UserCard card) {
         return UserCardResponse.builder()
                 .id(card.getId())
@@ -137,6 +223,9 @@ public class CardService {
                 .network(card.getNetwork())
                 .lastFourDigits(card.getLastFourDigits())
                 .active(card.isActive())
+                .docStatus(card.getDocStatus())
+                .docS3Key(card.getDocS3Key())
+                .lastAnalyzedAt(card.getLastAnalyzedAt())
                 .build();
     }
 }

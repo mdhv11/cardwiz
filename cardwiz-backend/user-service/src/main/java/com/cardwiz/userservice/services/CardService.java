@@ -27,14 +27,14 @@ public class CardService {
     private final UserRepository userRepository;
     private final UploadedDocumentRepository uploadedDocumentRepository;
 
-    @Cacheable(cacheNames = "cardMetadataByUser", key = "#userId")
+    @Cacheable(cacheNames = "cardMetadataByUserV2", key = "#userId")
     public List<UserCardResponse> getCardsForUser(Long userId) {
         return userCardRepository.findByUserId(userId).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
-    @Cacheable(cacheNames = "cardMetadataById", key = "T(java.lang.String).valueOf(#userId).concat(':').concat(T(java.lang.String).valueOf(#cardId))")
+    @Cacheable(cacheNames = "cardMetadataByIdV2", key = "T(java.lang.String).valueOf(#userId).concat(':').concat(T(java.lang.String).valueOf(#cardId))")
     public UserCardResponse getCard(Long userId, Long cardId) {
         UserCard card = userCardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
@@ -46,8 +46,8 @@ public class CardService {
 
     @Transactional
     @Caching(evict = {
-            @CacheEvict(cacheNames = {"cardMetadataByUser", "cardMetadataById"}, allEntries = true),
-            @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     })
     public UserCardResponse createCard(Long userId, UserCardRequest request) {
         User user = userRepository.findById(userId)
@@ -67,8 +67,8 @@ public class CardService {
 
     @Transactional
     @Caching(evict = {
-            @CacheEvict(cacheNames = {"cardMetadataByUser", "cardMetadataById"}, allEntries = true),
-            @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     })
     public UserCardResponse updateCard(Long userId, Long cardId, UserCardRequest request) {
         UserCard card = userCardRepository.findById(cardId)
@@ -96,8 +96,8 @@ public class CardService {
 
     @Transactional
     @Caching(evict = {
-            @CacheEvict(cacheNames = {"cardMetadataByUser", "cardMetadataById"}, allEntries = true),
-            @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+            @CacheEvict(cacheNames = {"cardMetadataByUserV2", "cardMetadataByIdV2"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     })
     public void deleteCard(Long userId, Long cardId) {
         UserCard card = userCardRepository.findById(cardId)
@@ -130,6 +130,7 @@ public class CardService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     public UploadedDocument markDocumentComplete(Long documentId, String aiSummary) {
         UploadedDocument document = uploadedDocumentRepository.findById(documentId)
                 .orElseThrow(() -> new RuntimeException("Document record not found"));

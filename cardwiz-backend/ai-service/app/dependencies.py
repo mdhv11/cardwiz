@@ -9,12 +9,24 @@ async def init_eureka():
         logger.info("Eureka registration disabled by configuration.")
         return
 
+    init_kwargs = {
+        "eureka_server": settings.EUREKA_SERVER,
+        "app_name": settings.APP_NAME,
+        "instance_port": settings.INSTANCE_PORT,
+    }
+    if settings.EUREKA_INSTANCE_HOST:
+        init_kwargs["instance_host"] = settings.EUREKA_INSTANCE_HOST
+
     await eureka_client.init_async(
-        eureka_server=settings.EUREKA_SERVER,
-        app_name=settings.APP_NAME,
-        instance_port=settings.INSTANCE_PORT
+        **init_kwargs
     )
-    logger.info(f"Registered {settings.APP_NAME} with Eureka at {settings.EUREKA_SERVER}")
+    logger.info(
+        "Registered %s with Eureka at %s (instance_host=%s, port=%s)",
+        settings.APP_NAME,
+        settings.EUREKA_SERVER,
+        settings.EUREKA_INSTANCE_HOST or "auto",
+        settings.INSTANCE_PORT,
+    )
 
 async def stop_eureka():
     if not settings.EUREKA_ENABLED:

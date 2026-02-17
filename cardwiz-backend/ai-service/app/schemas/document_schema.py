@@ -29,4 +29,4 @@ class NovaAnalysisResponse(BaseModel):
 class AnalyzeDocumentRequest(BaseModel):
     docId: int
     s3Key: str
-    bucket: str
+    bucket: Optional[str] = None

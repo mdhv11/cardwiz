@@ -37,7 +37,7 @@ public class TransactionService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+    @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     public TransactionResponse createTransaction(Long userId, TransactionRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -56,7 +56,7 @@ public class TransactionService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+    @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     public TransactionResponse updateTransaction(Long userId, Long transactionId, TransactionRequest request) {
         Transaction tx = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
@@ -87,7 +87,7 @@ public class TransactionService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+    @CacheEvict(cacheNames = "aiRecommendationsV2", allEntries = true)
     public void deleteTransaction(Long userId, Long transactionId) {
         Transaction tx = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));

@@ -2,6 +2,7 @@ package com.cardwiz.userservice.config;
 
 import com.cardwiz.userservice.repositories.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
@@ -32,6 +33,7 @@ public class ApplicationConfig {
 
     @Bean
     @LoadBalanced
+    @Qualifier("loadBalancedRestClientBuilder")
     public RestClient.Builder restClientBuilder() {
         return RestClient.builder();
     }

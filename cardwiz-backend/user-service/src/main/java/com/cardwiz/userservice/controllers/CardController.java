@@ -13,6 +13,7 @@ import com.cardwiz.userservice.services.CardService;
 import com.cardwiz.userservice.services.ImageUploadService;
 import com.cardwiz.userservice.services.UserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -20,10 +21,14 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/v1/cards")
 @RequiredArgsConstructor
+@Slf4j
 public class CardController {
 
     private final CardService cardService;
@@ -84,10 +89,11 @@ public class CardController {
 
         try {
             AiResponseDTO analysis = aiServiceClient.analyzeDocument(
-                    imageUploadService.getBucketName(),
+                    imageUploadService.getDocumentBucketName(),
                     s3Key,
                     document.getId()
             );
+            syncExtractedRules(userId, document.getId(), analysis);
             UploadedDocument completed = cardService.markDocumentComplete(document.getId(), analysis.getAiSummary());
             return ResponseEntity.ok(
                     DocumentIngestionResponseDTO.builder()
@@ -121,5 +127,63 @@ public class CardController {
         );
 
         return ResponseEntity.ok(aiServiceClient.getRecommendation(enrichedRequest));
+    }
+
+    private void syncExtractedRules(Long userId, Long documentId, AiResponseDTO analysis) {
+        if (analysis == null || analysis.getExtractedRules() == null || analysis.getExtractedRules().isEmpty()) {
+            return;
+        }
+
+        List<UserCardResponse> userCards = cardService.getCardsForUser(userId).stream()
+                .filter(UserCardResponse::isActive)
+                .toList();
+        if (userCards.isEmpty()) {
+            return;
+        }
+
+        Long fallbackCardId = userCards.get(0).getId();
+
+        for (int index = 0; index < analysis.getExtractedRules().size(); index++) {
+            AiResponseDTO.ExtractedRuleDTO rule = analysis.getExtractedRules().get(index);
+            Long mappedCardId = matchCardId(rule.getCardName(), userCards).orElse(fallbackCardId);
+            Integer ruleId = Objects.hash(documentId, index, mappedCardId, rule.getCategory(), rule.getRewardType());
+            String contentText = buildRuleContentText(rule);
+
+            try {
+                aiServiceClient.syncEmbedding(ruleId, mappedCardId, contentText);
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "Failed syncing embedding for documentId={}, ruleIndex={}, mappedCardId={}: {}",
+                        documentId,
+                        index,
+                        mappedCardId,
+                        ex.getMessage()
+                );
+            }
+        }
+    }
+
+    private Optional<Long> matchCardId(String extractedCardName, List<UserCardResponse> userCards) {
+        if (extractedCardName == null || extractedCardName.isBlank()) {
+            return Optional.empty();
+        }
+        String needle = extractedCardName.toLowerCase(Locale.ROOT);
+
+        return userCards.stream()
+                .filter(card -> card.getCardName() != null)
+                .filter(card -> {
+                    String haystack = card.getCardName().toLowerCase(Locale.ROOT);
+                    return haystack.contains(needle) || needle.contains(haystack);
+                })
+                .map(UserCardResponse::getId)
+                .findFirst();
+    }
+
+    private String buildRuleContentText(AiResponseDTO.ExtractedRuleDTO rule) {
+        String category = rule.getCategory() == null ? "general" : rule.getCategory();
+        String rewardRate = rule.getRewardRate() == null ? "0" : String.valueOf(rule.getRewardRate());
+        String rewardType = rule.getRewardType() == null ? "REWARD" : rule.getRewardType();
+        String conditions = rule.getConditions() == null ? "none" : rule.getConditions();
+        return category + " " + rewardRate + " " + rewardType + " " + conditions;
     }
 }

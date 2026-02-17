@@ -9,12 +9,11 @@ from app.schemas.recommendation_schema import (
     RecommendationResponse,
 )
 
-
 class RecommendationService:
     def __init__(self):
         self.embedding_service = EmbeddingService()
         self.bedrock = get_bedrock_runtime_client()
-        self.model_id = "us.amazon.nova-2-pro-v1:0"
+        self.model_id = "amazon.nova-2-lite-v1:0"
 
     def _build_reasoning_kwargs(self, message: dict) -> dict:
         kwargs = {

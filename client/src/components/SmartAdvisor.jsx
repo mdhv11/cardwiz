@@ -7,17 +7,30 @@ import {
     IconButton,
     List,
     ListItem,
-    ListItemText,
     Avatar,
-    CircularProgress
+    CircularProgress,
+    Tooltip
 } from '@mui/material';
-import { Send as SendIcon, SmartToy as BotIcon, Person as PersonIcon } from '@mui/icons-material';
-import { useTheme } from '@mui/material/styles';
+import {
+    Send as SendIcon,
+    SmartToy as BotIcon,
+    Person as PersonIcon,
+    AttachFile as AttachFileIcon,
+    DeleteOutline as DeleteOutlineIcon
+} from '@mui/icons-material';
 
-const SmartAdvisor = ({ onSendMessage, messages, isAnalyzing }) => {
+const SmartAdvisor = ({
+    onSendMessage,
+    onUploadDocument,
+    onClearHistory,
+    messages,
+    isAnalyzing,
+    isUploading = false,
+    isClearingHistory = false
+}) => {
     const [input, setInput] = useState('');
     const messagesEndRef = useRef(null);
-    const theme = useTheme();
+    const fileInputRef = useRef(null);
 
     const handleSend = () => {
         if (input.trim()) {
@@ -33,9 +46,24 @@ const SmartAdvisor = ({ onSendMessage, messages, isAnalyzing }) => {
         }
     };
 
+    const handleUploadClick = () => {
+        if (!isAnalyzing && !isUploading && !isClearingHistory) {
+            fileInputRef.current?.click();
+        }
+    };
+
+    const handleFileChange = async (event) => {
+        const selectedFile = event.target.files?.[0];
+        if (!selectedFile || !onUploadDocument) {
+            return;
+        }
+        await onUploadDocument(selectedFile);
+        event.target.value = '';
+    };
+
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, isAnalyzing]);
+    }, [messages, isAnalyzing, isUploading]);
 
     return (
         <Paper
@@ -51,12 +79,32 @@ const SmartAdvisor = ({ onSendMessage, messages, isAnalyzing }) => {
             }}
         >
             <Box sx={{ p: 2, borderBottom: '1px solid rgba(255, 255, 255, 0.1)', bgcolor: 'rgba(0, 0, 0, 0.2)' }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <BotIcon color="secondary" /> Smart Advisor
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                    Powered by Amazon Nova 2 Pro
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                    <Box>
+                        <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <BotIcon color="secondary" /> Smart Advisor
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            Powered by Amazon Nova 2 Pro
+                        </Typography>
+                    </Box>
+                    <Tooltip title="Clear chat history">
+                        <span>
+                            <IconButton
+                                color="secondary"
+                                size="small"
+                                onClick={onClearHistory}
+                                disabled={isAnalyzing || isUploading || isClearingHistory}
+                                sx={{
+                                    bgcolor: 'rgba(0, 200, 83, 0.1)',
+                                    '&:hover': { bgcolor: 'rgba(0, 200, 83, 0.2)' }
+                                }}
+                            >
+                                <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                        </span>
+                    </Tooltip>
+                </Box>
             </Box>
 
             <List sx={{ flexGrow: 1, overflow: 'auto', p: 2 }}>
@@ -110,11 +158,43 @@ const SmartAdvisor = ({ onSendMessage, messages, isAnalyzing }) => {
                         </Box>
                     </ListItem>
                 )}
+                {isUploading && (
+                    <ListItem sx={{ flexDirection: 'column', alignItems: 'flex-start', mb: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <CircularProgress size={16} color="secondary" />
+                            <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                                Uploading and analyzing your document...
+                            </Typography>
+                        </Box>
+                    </ListItem>
+                )}
                 <div ref={messagesEndRef} />
             </List>
 
             <Box sx={{ p: 2, borderTop: '1px solid rgba(255, 255, 255, 0.1)', bgcolor: 'rgba(0, 0, 0, 0.2)' }}>
                 <Box sx={{ display: 'flex', gap: 1 }}>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.png,.jpg,.jpeg,.webp"
+                        onChange={handleFileChange}
+                        style={{ display: 'none' }}
+                    />
+                    <Tooltip title="Upload statement or brochure">
+                        <span>
+                            <IconButton
+                                color="secondary"
+                                onClick={handleUploadClick}
+                                disabled={isAnalyzing || isUploading || isClearingHistory}
+                                sx={{
+                                    bgcolor: 'rgba(0, 200, 83, 0.1)',
+                                    '&:hover': { bgcolor: 'rgba(0, 200, 83, 0.2)' }
+                                }}
+                            >
+                                <AttachFileIcon />
+                            </IconButton>
+                        </span>
+                    </Tooltip>
                     <TextField
                         fullWidth
                         placeholder="Where should I use my card?"
@@ -123,7 +203,7 @@ const SmartAdvisor = ({ onSendMessage, messages, isAnalyzing }) => {
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyPress={handleKeyPress}
-                        disabled={isAnalyzing}
+                        disabled={isAnalyzing || isUploading || isClearingHistory}
                         sx={{
                             '& .MuiOutlinedInput-root': {
                                 borderRadius: 4,
@@ -134,7 +214,7 @@ const SmartAdvisor = ({ onSendMessage, messages, isAnalyzing }) => {
                     <IconButton
                         color="secondary"
                         onClick={handleSend}
-                        disabled={!input.trim() || isAnalyzing}
+                        disabled={!input.trim() || isAnalyzing || isUploading || isClearingHistory}
                         sx={{
                             bgcolor: 'rgba(0, 200, 83, 0.1)',
                             '&:hover': { bgcolor: 'rgba(0, 200, 83, 0.2)' }

@@ -441,6 +441,17 @@ Base paths are service-relative.
 | POST | `/ai/v1/recommend/rank` | Rank/recommend best card |
 | POST | `/ai/v1/embeddings/sync` | Sync/update embedding for rule text |
 
+### Via API Gateway (`user-service` on port `8080`)
+
+Use these when calling through the gateway:
+
+| Method | Gateway Endpoint | Forwards To (ai-service) |
+|---|---|---|
+| GET | `/api/v1/ai/health` | `/health` |
+| POST | `/api/v1/ai/documents/analyze` | `/ai/v1/documents/analyze` |
+| POST | `/api/v1/ai/recommend/rank` | `/ai/v1/recommend/rank` |
+| POST | `/api/v1/ai/embeddings/sync` | `/ai/v1/embeddings/sync` |
+
 #### Example: `GET /health`
 
 Response (200):

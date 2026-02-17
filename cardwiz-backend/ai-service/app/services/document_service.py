@@ -112,10 +112,26 @@ class DocumentService:
         Return ONLY a JSON object that matches this structure:
         {
           "extractedRules": [
-            {"cardName": "string", "category": "string", "rewardRate": float, "rewardType": "CASHBACK|POINTS|MILES", "conditions": "string"}
+            {
+              "cardName": "string",
+              "category": "string",
+              "rewardRate": float,
+              "rewardType": "CASHBACK|POINTS|MILES",
+              "pointsPerUnit": float|null,
+              "spendUnit": float|null,
+              "pointValueRupees": float|null,
+              "effectiveRewardPercentage": float,
+              "conditions": "string"
+            }
           ],
           "aiSummary": "A brief summary of the card's best value proposition."
         }
+
+        Normalization rules:
+        - For cashback percentages, effectiveRewardPercentage == cashback percentage.
+        - For points rules, compute effectiveRewardPercentage using:
+          pointsPerUnit * pointValueRupees / spendUnit * 100
+        - Example: 20 points per 150 spend, pointValueRupees=0.25 => 3.33
         """
 
         message = {

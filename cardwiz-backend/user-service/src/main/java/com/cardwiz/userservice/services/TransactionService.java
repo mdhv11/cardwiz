@@ -46,6 +46,7 @@ public class TransactionService {
                 .amount(request.getAmount())
                 .merchant(request.getMerchant())
                 .category(request.getCategory())
+                .currency(request.getCurrency())
                 .transactionDate(request.getTransactionDate())
                 .suggestedCardId(request.getSuggestedCardId())
                 .actualCardId(request.getActualCardId())
@@ -72,6 +73,9 @@ public class TransactionService {
         }
         if (request.getCategory() != null) {
             tx.setCategory(request.getCategory());
+        }
+        if (request.getCurrency() != null) {
+            tx.setCurrency(request.getCurrency());
         }
         if (request.getTransactionDate() != null) {
             tx.setTransactionDate(request.getTransactionDate());
@@ -103,6 +107,7 @@ public class TransactionService {
                 .amount(tx.getAmount())
                 .merchant(tx.getMerchant())
                 .category(tx.getCategory())
+                .currency(tx.getCurrency())
                 .transactionDate(tx.getTransactionDate())
                 .suggestedCardId(tx.getSuggestedCardId())
                 .actualCardId(tx.getActualCardId())

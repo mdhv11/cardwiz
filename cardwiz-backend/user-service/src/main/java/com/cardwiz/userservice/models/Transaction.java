@@ -25,6 +25,8 @@ public class Transaction {
 
     private String category;
 
+    private String currency;
+
     private LocalDate transactionDate;
 
     private Long suggestedCardId;   // AI recommendation

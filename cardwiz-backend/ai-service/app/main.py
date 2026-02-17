@@ -4,6 +4,9 @@ from app.config import settings
 from app.db import init_db
 from app.dependencies import init_eureka, stop_eureka
 from app.routes import document_routes, recommendation_routes, embedding_routes
+from app.consumers.kafka_ingest_consumer import KafkaIngestConsumer
+
+kafka_consumer = KafkaIngestConsumer()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -11,8 +14,10 @@ async def lifespan(app: FastAPI):
     init_db()
     # Startup: Register with Eureka
     await init_eureka()
+    await kafka_consumer.start()
     yield
     # Shutdown: Cleanly deregister
+    await kafka_consumer.stop()
     await stop_eureka()
 
 app = FastAPI(

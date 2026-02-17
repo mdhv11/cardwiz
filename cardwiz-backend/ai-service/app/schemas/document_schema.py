@@ -13,6 +13,10 @@ class ExtractedRule(BaseModel):
     category: str = Field(..., description="The spending category (e.g., Grocery, Dining)")
     rewardRate: float = Field(..., description="The percentage or multiplier value")
     rewardType: RewardType
+    pointsPerUnit: Optional[float] = None
+    spendUnit: Optional[float] = None
+    pointValueRupees: Optional[float] = None
+    effectiveRewardPercentage: Optional[float] = None
     conditions: Optional[str] = Field(None, description="Any limit or merchant restrictions")
 
 class DocumentMetadata(BaseModel):

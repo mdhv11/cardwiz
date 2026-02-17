@@ -4,6 +4,9 @@ import {
     Paper,
     Typography,
     TextField,
+    FormControl,
+    Select,
+    MenuItem,
     IconButton,
     List,
     ListItem,
@@ -23,6 +26,9 @@ const SmartAdvisor = ({
     onSendMessage,
     onUploadDocument,
     onClearHistory,
+    currencies = [],
+    selectedCurrency = 'INR',
+    onCurrencyChange,
     messages,
     isAnalyzing,
     isUploading = false,
@@ -34,7 +40,7 @@ const SmartAdvisor = ({
 
     const handleSend = () => {
         if (input.trim()) {
-            onSendMessage(input);
+            onSendMessage(input, { currency: selectedCurrency });
             setInput('');
         }
     };
@@ -211,6 +217,21 @@ const SmartAdvisor = ({
                             }
                         }}
                     />
+                    <FormControl size="small" sx={{ minWidth: 110 }}>
+                        <Select
+                            value={selectedCurrency}
+                            onChange={(e) => onCurrencyChange?.(e.target.value)}
+                            disabled={isAnalyzing || isUploading || isClearingHistory}
+                            sx={{
+                                borderRadius: 4,
+                                bgcolor: 'rgba(255, 255, 255, 0.05)'
+                            }}
+                        >
+                            {currencies.map((currency) => (
+                                <MenuItem key={currency} value={currency}>{currency}</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
                     <IconButton
                         color="secondary"
                         onClick={handleSend}

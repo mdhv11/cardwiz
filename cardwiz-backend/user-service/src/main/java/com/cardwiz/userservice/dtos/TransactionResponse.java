@@ -13,6 +13,7 @@ public class TransactionResponse {
     private BigDecimal amount;
     private String merchant;
     private String category;
+    private String currency;
     private LocalDate transactionDate;
     private Long suggestedCardId;
     private Long actualCardId;

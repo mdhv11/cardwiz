@@ -27,10 +27,10 @@ public class ImageUploadService {
 
     private final S3Client s3Client;
 
-    @Value("${aws.s3.document-bucket-name:epoch-documents}")
+    @Value("${aws.s3.document-bucket-name:epoch-docs}")
     private String documentBucketName;
 
-    @Value("${aws.s3.enabled:false}")
+    @Value("${aws.s3.enabled:true}")
     private boolean s3Enabled;
 
     private static final long MAX_DOCUMENT_SIZE = 20 * 1024 * 1024; // 20MB
@@ -74,9 +74,6 @@ public class ImageUploadService {
         }
     }
 
-    public String getProfileBucketName() {
-        return profileBucketName;
-    }
 
     public String getDocumentBucketName() {
         return documentBucketName;

@@ -10,9 +10,13 @@ const Advisor = () => {
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     const [isClearingHistory, setIsClearingHistory] = useState(false);
     const [toast, setToast] = useState({ open: false, severity: 'success', message: '' });
+    const [selectedCurrency, setSelectedCurrency] = useState('INR');
+    const [recentValidations, setRecentValidations] = useState([]);
+    const [pendingClarification, setPendingClarification] = useState(null);
 
     const allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'webp'];
     const maxUploadBytes = 20 * 1024 * 1024;
+    const supportedCurrencies = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'];
     const defaultWelcomeMessage = 'Hello! I am CardWiz. Ask me where to use your cards or upload a statement.';
 
     const appendMessage = async (sender, text, persist = true) => {
@@ -72,31 +76,135 @@ const Advisor = () => {
         return fallback;
     };
 
-    const parseRecommendationInput = (text) => {
-        const amountMatch = text.match(/(?:rs\.?|inr|₹|\$)\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
+    const parseRecommendationInput = (text, currency) => {
+        const amountMatch = text.match(/(?:rs\.?|inr|₹|\$)?\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
+        const lower = text.toLowerCase();
+        let category = 'general';
+        if (lower.includes('fuel') || lower.includes('gas') || lower.includes('petrol')) category = 'fuel';
+        if (lower.includes('grocery') || lower.includes('supermarket')) category = 'grocery';
+        if (lower.includes('travel') || lower.includes('flight') || lower.includes('hotel')) category = 'travel';
+        if (lower.includes('dining') || lower.includes('restaurant') || lower.includes('food')) category = 'dining';
+        if (lower.includes('online') || lower.includes('amazon') || lower.includes('flipkart')) category = 'online';
+
+        const contextNotes = recentValidations
+            .slice(0, 5)
+            .map((tx) => `${tx.merchant || 'merchant'}:${tx.category || 'general'}:${tx.currency || currency}:${tx.amount ?? 0}`)
+            .join(' ; ');
+
         return {
             merchantName: text,
-            category: 'general',
-            transactionAmount: amountMatch ? Number(amountMatch[1]) : 0
+            category,
+            transactionAmount: amountMatch ? Number(amountMatch[1]) : 0,
+            currency,
+            contextNotes
         };
     };
 
-    const handleSendMessage = async (text) => {
-        await appendMessage('user', text);
-        setIsAnalyzing(true);
-        try {
-            const payload = parseRecommendationInput(text);
-            const response = await axiosClient.post('/cards/recommendations', payload);
-            const recommendation = response.data?.bestOption;
+    const getMissingContext = (text) => {
+        const lower = text.trim().toLowerCase();
+        const hasMerchantHint =
+            /(amazon|uber|starbucks|swiggy|zomato|walmart|target|costco|myntra|flipkart|restaurant|fuel|grocery|hotel|flight|dining|food|shopping)/i.test(text);
+        const hasAmountHint = /(?:rs\.?|inr|₹|\$)?\s*[0-9]+(?:\.[0-9]{1,2})?/.test(lower);
+        return { hasMerchantHint, hasAmountHint };
+    };
 
-            if (!recommendation) {
-                await pushBotMessage('I could not find a recommendation right now. Please try again.');
+    const mergeClarificationText = (initialPrompt, clarificationReply) => {
+        const merged = `${initialPrompt} ${clarificationReply}`.trim();
+        // If user only enters number, convert into spend context phrase.
+        if (/^\s*[0-9]+(?:\.[0-9]{1,2})?\s*$/.test(clarificationReply)) {
+            return `${initialPrompt} spend ${clarificationReply}`;
+        }
+        return merged;
+    };
+
+    const formatRecommendationMessage = (payload) => {
+        const richBest = payload?.best_card;
+        if (richBest?.name && richBest?.rewards) {
+            const tx = payload?.transaction_context || {};
+            const spendAmount = tx.spend_amount ?? 0;
+            const currency = tx.currency || richBest.rewards.value_unit || selectedCurrency;
+            const rewardValue = Number(richBest.rewards.estimated_value ?? 0);
+            const effectivePct = Number(richBest.rewards.effective_percentage ?? 0);
+            const reasoning = Array.isArray(richBest.reasoning) ? richBest.reasoning.filter(Boolean) : [];
+            const reasons = reasoning.length > 0 ? `Why: ${reasoning.join(' | ')}` : '';
+            const warning = richBest.warning ? `Warning: ${richBest.warning}` : '';
+
+            const comparisonRows = Array.isArray(payload?.comparison_table) ? payload.comparison_table : [];
+            const comparisonText = comparisonRows.length > 0
+                ? `VS: ${comparisonRows
+                    .map((row) => `${row.card_name} (${Number(row.effective_percentage ?? 0).toFixed(2)}%, ${currency} ${Number(row.estimated_value ?? 0).toFixed(2)})`)
+                    .join(' | ')}`
+                : '';
+
+            return [
+                `Best card: ${richBest.name}.`,
+                `For ${currency} ${Number(spendAmount).toLocaleString()} spend, estimated rewards: ${currency} ${rewardValue.toFixed(2)} (${effectivePct.toFixed(2)}%).`,
+                richBest.calculation_logic ? `Calc: ${richBest.calculation_logic}` : '',
+                reasons,
+                warning,
+                comparisonText
+            ]
+                .filter(Boolean)
+                .join(' ');
+        }
+
+        const recommendation = payload?.bestOption;
+        if (!recommendation) {
+            return 'I could not find a recommendation right now. Please try again.';
+        }
+        const reward = recommendation.estimatedReward || 'No reward details available';
+        const reason = recommendation.reasoning || 'No reasoning available';
+        return `Best card: ${recommendation.cardName}. Reward: ${reward}. Why: ${reason}`;
+    };
+
+    const handleSendMessage = async (text, options = {}) => {
+        await appendMessage('user', text);
+        const lower = text.trim().toLowerCase();
+        const looksGeneric =
+            lower.length < 12 ||
+            lower.includes('which card') ||
+            lower.includes('best card') ||
+            lower.includes('should i get this card') ||
+            lower.includes('what should i use');
+
+        const { hasMerchantHint, hasAmountHint } = getMissingContext(text);
+
+        if (pendingClarification) {
+            const mergedText = mergeClarificationText(pendingClarification.initialPrompt, text);
+            const mergedContext = getMissingContext(mergedText);
+            if (!mergedContext.hasMerchantHint || !mergedContext.hasAmountHint) {
+                await pushBotMessage(
+                    `Almost there. Please share both where you are spending and approx amount (${options.currency || selectedCurrency}).`
+                );
                 return;
             }
+            setPendingClarification(null);
+            setIsAnalyzing(true);
+            try {
+                const payload = parseRecommendationInput(mergedText, options.currency || selectedCurrency);
+                const response = await axiosClient.post('/cards/recommendations', payload);
+                await pushBotMessage(formatRecommendationMessage(response.data));
+            } catch (error) {
+                await pushBotMessage(extractErrorMessage(error, 'Recommendation failed. Please try again in a moment.'));
+            } finally {
+                setIsAnalyzing(false);
+            }
+            return;
+        }
 
-            const reward = recommendation.estimatedReward || 'No reward details available';
-            const reason = recommendation.reasoning || 'No reasoning available';
-            await pushBotMessage(`Best card: ${recommendation.cardName}. Reward: ${reward}. Why: ${reason}`);
+        if (looksGeneric && (!hasMerchantHint || !hasAmountHint)) {
+            setPendingClarification({ initialPrompt: text });
+            await pushBotMessage(
+                `I can help, but I need one detail first: where are you spending and roughly how much (${options.currency || selectedCurrency})?`
+            );
+            return;
+        }
+
+        setIsAnalyzing(true);
+        try {
+            const payload = parseRecommendationInput(text, options.currency || selectedCurrency);
+            const response = await axiosClient.post('/cards/recommendations', payload);
+            await pushBotMessage(formatRecommendationMessage(response.data));
         } catch (error) {
             await pushBotMessage(extractErrorMessage(error, 'Recommendation failed. Please try again in a moment.'));
         } finally {
@@ -210,6 +318,19 @@ const Advisor = () => {
         loadHistory();
     }, []);
 
+    useEffect(() => {
+        const loadRecentValidations = async () => {
+            try {
+                const response = await axiosClient.get('/transactions');
+                const items = Array.isArray(response.data) ? response.data : [];
+                setRecentValidations(items);
+            } catch (_) {
+                setRecentValidations([]);
+            }
+        };
+        loadRecentValidations();
+    }, []);
+
     return (
         <Box sx={{ height: 'calc(100vh - 100px)' }}> {/* Adjust for layout padding */}
             <SmartAdvisor
@@ -217,6 +338,9 @@ const Advisor = () => {
                 onSendMessage={handleSendMessage}
                 onUploadDocument={handleUploadDocument}
                 onClearHistory={handleClearHistory}
+                currencies={supportedCurrencies}
+                selectedCurrency={selectedCurrency}
+                onCurrencyChange={setSelectedCurrency}
                 isAnalyzing={isAnalyzing || isHistoryLoading}
                 isUploading={isUploading}
                 isClearingHistory={isClearingHistory}

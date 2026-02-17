@@ -52,7 +52,7 @@ Return plain text only.
         )
 
         eligible = set(request.availableCardIds)
-        survivors = [row for row in ranked_rules if row.card_id in eligible]
+        survivors = [row for row in ranked_rules if row["card_id"] in eligible]
 
         if not survivors:
             best_card_id = request.availableCardIds[0]
@@ -72,12 +72,12 @@ Return plain text only.
         best_reasoning = await self._build_reasoning(
             merchant_name=request.merchantName,
             category=category,
-            reward_text=best.content_text,
+            reward_text=best["content_text"],
         )
         best_option = CardRecommendation(
-            cardId=best.card_id,
-            cardName=f"Card {best.card_id}",
-            estimatedReward=best.content_text,
+            cardId=best["card_id"],
+            cardName=f"Card {best['card_id']}",
+            estimatedReward=best["content_text"],
             reasoning=best_reasoning,
             confidenceScore=0.86,
         )
@@ -86,9 +86,9 @@ Return plain text only.
         for alt in survivors[1:3]:
             alternatives.append(
                 CardRecommendation(
-                    cardId=alt.card_id,
-                    cardName=f"Card {alt.card_id}",
-                    estimatedReward=alt.content_text,
+                    cardId=alt["card_id"],
+                    cardName=f"Card {alt['card_id']}",
+                    estimatedReward=alt["content_text"],
                     reasoning="Strong alternative from vector similarity ranking.",
                     confidenceScore=0.72,
                 )

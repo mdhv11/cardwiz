@@ -8,6 +8,9 @@ import com.cardwiz.userservice.models.User;
 import com.cardwiz.userservice.repositories.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -29,12 +32,14 @@ public class UserService {
                 .map(this::toResponse);
     }
 
+    @Cacheable(cacheNames = "userProfileById", key = "#userId")
     public UserResponseDTO getUserProfile(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
         return toResponse(user);
     }
 
+    @Cacheable(cacheNames = "userProfileByEmail", key = "#email")
     public UserResponseDTO getUserProfileByEmail(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -42,6 +47,7 @@ public class UserService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"userProfileById", "userProfileByEmail"}, allEntries = true)
     public UserResponseDTO updateUserProfile(Long userId, UserUpdateRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -57,6 +63,7 @@ public class UserService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"userProfileById", "userProfileByEmail"}, allEntries = true)
     public void changePassword(Long userId, ChangePasswordRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -82,6 +89,7 @@ public class UserService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"userProfileById", "userProfileByEmail"}, allEntries = true)
     public UserResponseDTO updateProfileImage(Long userId, String imageKey) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -101,6 +109,11 @@ public class UserService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"userProfileById", "userProfileByEmail"}, allEntries = true),
+            @CacheEvict(cacheNames = {"cardMetadataByUser", "cardMetadataById"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+    })
     public void deleteUser(Long userId) {
         if (!userRepository.existsById(userId)) {
             throw new UserNotFoundException("User not found");

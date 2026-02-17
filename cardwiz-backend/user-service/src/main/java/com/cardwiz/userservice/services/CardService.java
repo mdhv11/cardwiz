@@ -12,6 +12,9 @@ import com.cardwiz.userservice.repositories.UserCardRepository;
 import com.cardwiz.userservice.repositories.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -24,12 +27,14 @@ public class CardService {
     private final UserRepository userRepository;
     private final UploadedDocumentRepository uploadedDocumentRepository;
 
+    @Cacheable(cacheNames = "cardMetadataByUser", key = "#userId")
     public List<UserCardResponse> getCardsForUser(Long userId) {
         return userCardRepository.findByUserId(userId).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
+    @Cacheable(cacheNames = "cardMetadataById", key = "T(java.lang.String).valueOf(#userId).concat(':').concat(T(java.lang.String).valueOf(#cardId))")
     public UserCardResponse getCard(Long userId, Long cardId) {
         UserCard card = userCardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
@@ -40,6 +45,10 @@ public class CardService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUser", "cardMetadataById"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+    })
     public UserCardResponse createCard(Long userId, UserCardRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -57,6 +66,10 @@ public class CardService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUser", "cardMetadataById"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+    })
     public UserCardResponse updateCard(Long userId, Long cardId, UserCardRequest request) {
         UserCard card = userCardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
@@ -82,6 +95,10 @@ public class CardService {
     }
 
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = {"cardMetadataByUser", "cardMetadataById"}, allEntries = true),
+            @CacheEvict(cacheNames = "aiRecommendations", allEntries = true)
+    })
     public void deleteCard(Long userId, Long cardId) {
         UserCard card = userCardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));

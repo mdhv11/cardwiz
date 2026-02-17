@@ -5,6 +5,7 @@ import com.cardwiz.userservice.dtos.AnalyzeRequestDTO;
 import com.cardwiz.userservice.dtos.RecommendationDTO;
 import com.cardwiz.userservice.dtos.RecommendationRequestDTO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -26,6 +27,10 @@ public class AiServiceClient {
                 .body(AiResponseDTO.class);
     }
 
+    @Cacheable(
+            cacheNames = "aiRecommendations",
+            key = "T(java.util.Objects).hash(#request.userId, #request.merchantName, #request.category, #request.transactionAmount, #request.availableCardIds)"
+    )
     public RecommendationDTO getRecommendation(RecommendationRequestDTO request) {
         return restClientBuilder.build()
                 .post()

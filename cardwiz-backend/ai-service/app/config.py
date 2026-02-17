@@ -1,7 +1,12 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),
+        extra="ignore",
+    )
+
     # Eureka Config
     EUREKA_ENABLED: bool = False
     EUREKA_SERVER: str = "http://localhost:8761/eureka"
@@ -9,7 +14,7 @@ class Settings(BaseSettings):
     INSTANCE_PORT: int = 8000
 
     # AWS Config
-    AWS_REGION: str = "us-east-1"
+    AWS_REGION: str = "ap-south-1"
 
     # Nova Config
     NOVA_ENABLE_REASONING: bool = False
@@ -19,8 +24,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/cardwiz"
     VECTOR_TOP_K: int = 5
 
-    class Config:
-        env_file = (".env", "../.env")
-
+    # Redis Cache Config
+    REDIS_ENABLED: bool = True
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_TTL_SECONDS: int = 600
 
 settings = Settings()

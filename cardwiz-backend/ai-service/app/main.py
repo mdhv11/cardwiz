@@ -29,3 +29,14 @@ app.include_router(embedding_routes.router, prefix="/ai/v1/embeddings", tags=["E
 @app.get("/health")
 async def health_check():
     return {"status": "UP", "service": settings.APP_NAME}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=settings.INSTANCE_PORT,
+        reload=False,
+    )

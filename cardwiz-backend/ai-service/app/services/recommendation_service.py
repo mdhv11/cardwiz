@@ -4,6 +4,8 @@ import re
 import uuid
 
 from app.clients.bedrock_client import get_bedrock_runtime_client
+from app.services.agent_service import AgentService
+from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
 from app.schemas.recommendation_schema import (
     BestCardDetails,
@@ -12,6 +14,10 @@ from app.schemas.recommendation_schema import (
     RecommendationRequest,
     RecommendationResponse,
     RecommendationRewards,
+    StatementMissedSavingsRequest,
+    StatementMissedSavingsResponse,
+    StatementMissedSavingsSummary,
+    StatementTransactionReport,
     TransactionContext,
 )
 
@@ -21,6 +27,8 @@ logger = logging.getLogger("uvicorn")
 class RecommendationService:
     def __init__(self):
         self.embedding_service = EmbeddingService()
+        self.agent_service = AgentService(self.embedding_service)
+        self.document_service = DocumentService()
         self.bedrock = get_bedrock_runtime_client()
         self.model_id = "us.amazon.nova-lite-v1:0"
 
@@ -96,12 +104,16 @@ Return STRICT JSON only:
             return None
 
     async def get_recommendation(self, request: RecommendationRequest) -> RecommendationResponse:
+        routing_mode = "llm_rerank"
+        routing_reason = "UNSET"
         requested_ids = [int(card_id) for card_id in request.availableCardIds or []]
         covered_ids = sorted(await self.embedding_service.get_card_rule_coverage(requested_ids))
         missing_ids = sorted(set(requested_ids) - set(covered_ids))
         has_sufficient_data = len(covered_ids) >= 2 if len(requested_ids) >= 2 else len(covered_ids) >= 1
 
         if not request.availableCardIds:
+            routing_mode = "none"
+            routing_reason = "NO_AVAILABLE_CARDS"
             empty_best = CardRecommendation(
                 cardId=-1,
                 cardName="Unknown",
@@ -126,6 +138,8 @@ Return STRICT JSON only:
                 covered_card_ids=covered_ids,
                 missing_card_ids=missing_ids,
                 has_sufficient_data=False,
+                routing_mode=routing_mode,
+                routing_reason=routing_reason,
             )
 
         category = request.category or "general"
@@ -140,6 +154,8 @@ Return STRICT JSON only:
         survivors = [c for c in raw_candidates if c["card_id"] in eligible_ids]
 
         if not survivors:
+            routing_mode = "none"
+            routing_reason = "NO_SURVIVING_RULES"
             fallback_id = request.availableCardIds[0]
             fallback_best = CardRecommendation(
                 cardId=fallback_id,
@@ -161,20 +177,44 @@ Return STRICT JSON only:
                 covered_card_ids=covered_ids,
                 missing_card_ids=missing_ids,
                 has_sufficient_data=has_sufficient_data,
+                routing_mode=routing_mode,
+                routing_reason=routing_reason,
             )
 
-        prompt = self._build_math_aware_prompt(
-            merchant=request.merchantName,
-            category=category,
-            amount=spend,
-            currency=currency,
-            context_notes=context_notes,
-            candidates=survivors[:5],
-        )
-        decision = await self._get_llm_decision(prompt)
+        decision = None
+        should_use_agent, initial_mode, initial_reason = self.agent_service.get_route_metadata(request)
+        routing_mode = initial_mode
+        routing_reason = initial_reason
+
+        if should_use_agent:
+            decision = await self.agent_service.solve_optimization(request)
+            if decision:
+                routing_mode = "agent"
+                routing_reason = f"{initial_reason}:AGENT_SUCCESS"
+            else:
+                routing_reason = f"{initial_reason}:AGENT_NO_DECISION"
+
+        if not decision and routing_mode == "deterministic":
+            decision = self._deterministic_decision(survivors, spend)
+            routing_reason = f"{routing_reason}:DETERMINISTIC_FASTPATH"
+        elif not decision:
+            prompt = self._build_math_aware_prompt(
+                merchant=request.merchantName,
+                category=category,
+                amount=spend,
+                currency=currency,
+                context_notes=context_notes,
+                candidates=survivors[:5],
+            )
+            decision = await self._get_llm_decision(prompt)
+            if decision:
+                routing_mode = "llm_rerank"
+                routing_reason = f"{routing_reason}:NOVA_LITE_SUCCESS"
 
         if not decision:
             decision = self._deterministic_decision(survivors, spend)
+            routing_mode = "deterministic"
+            routing_reason = f"{routing_reason}:FINAL_DETERMINISTIC_FALLBACK"
 
         winner_card_id = self._pick_winner_card_id(decision, survivors)
         winner = next((s for s in survivors if s["card_id"] == winner_card_id), survivors[0])
@@ -263,6 +303,15 @@ Return STRICT JSON only:
             for item in comparison_table[:3]
         ]
 
+        logger.info(
+            "Recommendation routing mode=%s reason=%s userId=%s merchant=%s cards=%s",
+            routing_mode,
+            routing_reason,
+            request.userId,
+            request.merchantName,
+            len(request.availableCardIds or []),
+        )
+
         return RecommendationResponse(
             recommendation_id=f"rec_{uuid.uuid4().hex[:10]}",
             transaction_context=TransactionContext(
@@ -275,10 +324,99 @@ Return STRICT JSON only:
             comparison_table=comparison_table,
             bestOption=legacy_best,
             alternatives=alternatives,
-            semanticContext=f"Analyzed {len(survivors)} rules using Nova Lite reranking.",
+            semanticContext=(
+                f"Routing={routing_mode}; reason={routing_reason}. "
+                f"Analyzed {len(survivors)} rules."
+            ),
             covered_card_ids=covered_ids,
             missing_card_ids=missing_ids,
             has_sufficient_data=has_sufficient_data,
+            routing_mode=routing_mode,
+            routing_reason=routing_reason,
+        )
+
+    async def analyze_statement_missed_savings(
+        self,
+        request: StatementMissedSavingsRequest,
+    ) -> StatementMissedSavingsResponse:
+        card_pool = list(dict.fromkeys([int(card_id) for card_id in request.availableCardIds or []]))
+        actual_card_id = int(request.actualCardId)
+        if actual_card_id not in card_pool:
+            card_pool.append(actual_card_id)
+
+        extracted = await self.document_service.extract_statement_transactions(
+            s3_key=request.statementS3Key,
+            bucket=request.bucket,
+            limit=request.limitTransactions,
+        )
+
+        currency = (request.currency or "INR").upper()
+        reports: list[StatementTransactionReport] = []
+        total_spend = 0.0
+        total_actual_rewards = 0.0
+        total_optimal_rewards = 0.0
+
+        for tx in extracted.transactions:
+            amount = self._normalized_spend(tx.amount)
+            total_spend += amount
+
+            actual_result = await self.get_recommendation(
+                RecommendationRequest(
+                    userId=request.userId,
+                    merchantName=tx.merchant,
+                    category=None,
+                    transactionAmount=amount,
+                    currency=currency,
+                    contextNotes=(request.contextNotes or "") + " [BULK_EVAL]",
+                    availableCardIds=[actual_card_id],
+                )
+            )
+            optimal_result = await self.get_recommendation(
+                RecommendationRequest(
+                    userId=request.userId,
+                    merchantName=tx.merchant,
+                    category=None,
+                    transactionAmount=amount,
+                    currency=currency,
+                    contextNotes=(request.contextNotes or "") + " [BULK_EVAL]",
+                    availableCardIds=card_pool,
+                )
+            )
+
+            actual_name, actual_value = self._extract_card_value(actual_result, actual_card_id)
+            optimal_id, optimal_name, optimal_value = self._extract_best_card(optimal_result)
+            missed_value = max(0.0, optimal_value - actual_value)
+
+            total_actual_rewards += actual_value
+            total_optimal_rewards += optimal_value
+
+            reports.append(
+                StatementTransactionReport(
+                    date=tx.date,
+                    merchant=tx.merchant,
+                    amount=round(amount, 2),
+                    actual_card_id=actual_card_id,
+                    actual_card_name=actual_name,
+                    actual_reward_value=round(actual_value, 2),
+                    actual_reward_source="ENGINE_ESTIMATE",
+                    optimal_card_id=optimal_id,
+                    optimal_card_name=optimal_name,
+                    optimal_reward_value=round(optimal_value, 2),
+                    missed_value=round(missed_value, 2),
+                )
+            )
+
+        return StatementMissedSavingsResponse(
+            statement_s3_key=request.statementS3Key,
+            summary=StatementMissedSavingsSummary(
+                transactions_analyzed=len(reports),
+                total_spend=round(total_spend, 2),
+                total_actual_rewards=round(total_actual_rewards, 2),
+                total_optimal_rewards=round(total_optimal_rewards, 2),
+                total_missed_savings=round(max(0.0, total_optimal_rewards - total_actual_rewards), 2),
+                currency=currency,
+            ),
+            transactions=reports,
         )
 
     def _deterministic_decision(self, survivors: list[dict], spend: float) -> dict:
@@ -522,3 +660,36 @@ Return STRICT JSON only:
         if "cap" in lowered or "max" in lowered:
             return "Reward caps may limit actual earnings."
         return None
+
+    @staticmethod
+    def _extract_best_card(response: RecommendationResponse) -> tuple[int, str, float]:
+        if response.best_card:
+            return (
+                int(response.best_card.id),
+                response.best_card.name,
+                float(response.best_card.rewards.estimated_value),
+            )
+        return (
+            int(response.bestOption.cardId),
+            response.bestOption.cardName,
+            RecommendationService._parse_reward_value(response.bestOption.estimatedReward),
+        )
+
+    @staticmethod
+    def _extract_card_value(response: RecommendationResponse, fallback_card_id: int) -> tuple[str, float]:
+        if response.best_card:
+            return response.best_card.name, float(response.best_card.rewards.estimated_value)
+        return response.bestOption.cardName or f"Card {fallback_card_id}", RecommendationService._parse_reward_value(
+            response.bestOption.estimatedReward
+        )
+
+    @staticmethod
+    def _parse_reward_value(text: str) -> float:
+        if not text:
+            return 0.0
+        match = re.search(r"earn:\s*[A-Za-z]{3}\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)", text, re.IGNORECASE)
+        if not match:
+            match = re.search(r"\b([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\b", text)
+        if not match:
+            return 0.0
+        return float(match.group(1).replace(",", ""))

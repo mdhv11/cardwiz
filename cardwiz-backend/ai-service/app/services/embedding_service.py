@@ -4,7 +4,7 @@ import logging
 import re
 
 from botocore.exceptions import ClientError
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 
 from app.clients.bedrock_client import get_bedrock_runtime_client
 from app.clients.cache_client import get_cache_client
@@ -160,27 +160,52 @@ class EmbeddingService:
 
     async def search_similar_rules(self, query_text: str, top_k: int | None = None):
         query_embedding = await self.get_embedding(query_text, settings.EMBEDDING_RETRIEVAL_PURPOSE)
+        if not query_embedding:
+            raise ValueError("No query embedding generated for hybrid search")
+
         k = top_k or settings.VECTOR_TOP_K
-        query_cache_key = self._hash_key("embedding-lookup", f"{self.sanitize_text(query_text)}|{k}")
+        normalized_query = self.sanitize_text(query_text) or "general"
+        query_cache_key = self._hash_key(
+            "embedding-lookup",
+            (
+                f"{normalized_query}|{k}|"
+                f"{settings.HYBRID_VECTOR_WEIGHT:.4f}|{settings.HYBRID_KEYWORD_WEIGHT:.4f}|"
+                f"{settings.HYBRID_FTS_LANGUAGE}"
+            ),
+        )
         if self.cache:
             cached_rules = self.cache.get(query_cache_key)
             if cached_rules:
                 return json.loads(cached_rules)
 
         with SessionLocal() as session:
+            vector_score = (1.0 - RewardRuleVector.embedding.cosine_distance(query_embedding)).label("vector_score")
+            text_query = func.plainto_tsquery(settings.HYBRID_FTS_LANGUAGE, normalized_query)
+            text_score = func.ts_rank(
+                func.to_tsvector(settings.HYBRID_FTS_LANGUAGE, func.coalesce(RewardRuleVector.content_text, "")),
+                text_query,
+            ).label("text_score")
+            final_score = (
+                (vector_score * settings.HYBRID_VECTOR_WEIGHT)
+                + (text_score * settings.HYBRID_KEYWORD_WEIGHT)
+            ).label("final_score")
+
             rows = session.execute(
-                select(RewardRuleVector)
-                .order_by(RewardRuleVector.embedding.cosine_distance(query_embedding))
+                select(RewardRuleVector, vector_score, text_score, final_score)
+                .order_by(desc(final_score))
                 .limit(k)
-            ).scalars().all()
+            ).all()
 
         payload = [
             {
-                "rule_id": row.rule_id,
-                "card_id": row.card_id,
-                "content_text": row.content_text,
+                "rule_id": row_data.rule_id,
+                "card_id": row_data.card_id,
+                "content_text": row_data.content_text,
+                "vector_score": round(float(v_score or 0.0), 6),
+                "text_score": round(float(t_score or 0.0), 6),
+                "final_score": round(float(f_score or 0.0), 6),
             }
-            for row in rows
+            for row_data, v_score, t_score, f_score in rows
         ]
         if self.cache:
             try:

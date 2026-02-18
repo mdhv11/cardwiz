@@ -102,6 +102,7 @@ public class TransactionService {
     }
 
     private TransactionResponse toResponse(Transaction tx) {
+        String validationStatus = deriveValidationStatus(tx.getSuggestedCardId(), tx.getActualCardId());
         return TransactionResponse.builder()
                 .id(tx.getId())
                 .amount(tx.getAmount())
@@ -111,6 +112,14 @@ public class TransactionService {
                 .transactionDate(tx.getTransactionDate())
                 .suggestedCardId(tx.getSuggestedCardId())
                 .actualCardId(tx.getActualCardId())
+                .validationStatus(validationStatus)
                 .build();
+    }
+
+    private String deriveValidationStatus(Long suggestedCardId, Long actualCardId) {
+        if (actualCardId == null || suggestedCardId == null) {
+            return "NOT_SET";
+        }
+        return suggestedCardId.equals(actualCardId) ? "MATCHED" : "MISSED";
     }
 }

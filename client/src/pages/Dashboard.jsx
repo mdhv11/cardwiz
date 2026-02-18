@@ -6,16 +6,12 @@ import {
     Paper,
     Button,
     Grid,
-    Dialog,
-    DialogTitle,
-    DialogContent,
-    DialogActions,
-    TextField,
-    MenuItem
+    Chip
 } from '@mui/material';
 import { Add as AddIcon, ArrowForward as ArrowForwardIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import RewardCard from '../components/RewardCard';
+import ValidationDialogForm from '../components/ValidationDialogForm';
 import axiosClient from '../api/axiosClient';
 import { fetchCards } from '../store/slices/cardSlice';
 
@@ -25,17 +21,8 @@ const Dashboard = () => {
     const { user } = useSelector((state) => state.auth);
     const { items: cards, loading } = useSelector((state) => state.cards);
     const [recentValidations, setRecentValidations] = useState([]);
+    const [lastValidationResult, setLastValidationResult] = useState(null);
     const [dialogOpen, setDialogOpen] = useState(false);
-    const [newValidation, setNewValidation] = useState({
-        merchant: '',
-        amount: '',
-        category: 'general',
-        currency: 'INR',
-        transactionDate: new Date().toISOString().slice(0, 10)
-    });
-
-    const currencyOptions = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'];
-    const categoryOptions = ['general', 'grocery', 'dining', 'travel', 'fuel', 'online', 'shopping'];
 
     const loadRecentValidations = async () => {
         try {
@@ -68,34 +55,21 @@ const Dashboard = () => {
         return `${currency || 'INR'} ${amount}`;
     };
 
-    const handleValidationChange = (e) => {
-        setNewValidation((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    const resolveValidationStatus = (item) => {
+        const status = item?.validationStatus || item?.validation_status;
+        if (status) {
+            return status;
+        }
+        if (!item?.actualCardId || !item?.suggestedCardId) {
+            return 'NOT_SET';
+        }
+        return item.actualCardId === item.suggestedCardId ? 'MATCHED' : 'MISSED';
     };
 
-    const handleAddValidation = async () => {
-        if (!newValidation.merchant.trim() || !newValidation.amount) {
-            return;
-        }
-        try {
-            await axiosClient.post('/transactions', {
-                merchant: newValidation.merchant.trim(),
-                amount: Number(newValidation.amount),
-                category: newValidation.category,
-                currency: newValidation.currency,
-                transactionDate: newValidation.transactionDate
-            });
-            setDialogOpen(false);
-            setNewValidation({
-                merchant: '',
-                amount: '',
-                category: 'general',
-                currency: 'INR',
-                transactionDate: new Date().toISOString().slice(0, 10)
-            });
-            loadRecentValidations();
-        } catch (_) {
-            // Keep dashboard usable on transient API errors.
-        }
+    const statusChipColor = (status) => {
+        if (status === 'MATCHED') return 'success';
+        if (status === 'MISSED') return 'warning';
+        return 'default';
     };
 
     return (
@@ -118,6 +92,26 @@ const Dashboard = () => {
                     Add Card
                 </Button>
             </Box>
+            {lastValidationResult?.recommendation && (
+                <Paper sx={{ p: 2, mb: 3, border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                        Latest Validation Processed
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Suggested card: {lastValidationResult.recommendation?.best_card?.name || lastValidationResult.recommendation?.bestOption?.cardName || 'Unknown'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        Routing: {lastValidationResult.recommendation?.routing_mode || 'N/A'} ({lastValidationResult.recommendation?.routing_reason || 'N/A'})
+                    </Typography>
+                    <Box sx={{ mt: 1 }}>
+                        <Chip
+                            size="small"
+                            label={`Validation: ${resolveValidationStatus(lastValidationResult.transaction || {})}`}
+                            color={statusChipColor(resolveValidationStatus(lastValidationResult.transaction || {}))}
+                        />
+                    </Box>
+                </Paper>
+            )}
 
             <Grid container spacing={4}>
                 {/* Cards Section */}
@@ -214,6 +208,14 @@ const Dashboard = () => {
                                     <Typography variant="caption" color="secondary.main">
                                         {(item.category || 'general').toUpperCase()}
                                     </Typography>
+                                    <Box sx={{ mt: 0.5 }}>
+                                        <Chip
+                                            size="small"
+                                            label={resolveValidationStatus(item)}
+                                            color={statusChipColor(resolveValidationStatus(item))}
+                                            sx={{ fontSize: 10, height: 20 }}
+                                        />
+                                    </Box>
                                 </Box>
                             </Box>
                         ))}
@@ -225,67 +227,15 @@ const Dashboard = () => {
                     </Paper>
                 </Grid>
             </Grid>
-            <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
-                <DialogTitle>Add Validation</DialogTitle>
-                <DialogContent>
-                    <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
-                        <TextField
-                            label="Merchant"
-                            name="merchant"
-                            value={newValidation.merchant}
-                            onChange={handleValidationChange}
-                            required
-                            fullWidth
-                        />
-                        <TextField
-                            label="Amount"
-                            name="amount"
-                            type="number"
-                            value={newValidation.amount}
-                            onChange={handleValidationChange}
-                            required
-                            fullWidth
-                        />
-                        <TextField
-                            select
-                            label="Category"
-                            name="category"
-                            value={newValidation.category}
-                            onChange={handleValidationChange}
-                            fullWidth
-                        >
-                            {categoryOptions.map((category) => (
-                                <MenuItem key={category} value={category}>{category}</MenuItem>
-                            ))}
-                        </TextField>
-                        <TextField
-                            select
-                            label="Currency"
-                            name="currency"
-                            value={newValidation.currency}
-                            onChange={handleValidationChange}
-                            fullWidth
-                        >
-                            {currencyOptions.map((currency) => (
-                                <MenuItem key={currency} value={currency}>{currency}</MenuItem>
-                            ))}
-                        </TextField>
-                        <TextField
-                            label="Date"
-                            name="transactionDate"
-                            type="date"
-                            value={newValidation.transactionDate}
-                            onChange={handleValidationChange}
-                            InputLabelProps={{ shrink: true }}
-                            fullWidth
-                        />
-                    </Box>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-                    <Button variant="contained" color="secondary" onClick={handleAddValidation}>Save</Button>
-                </DialogActions>
-            </Dialog>
+            <ValidationDialogForm
+                open={dialogOpen}
+                onClose={() => setDialogOpen(false)}
+                cards={cards}
+                onSaved={(payload) => {
+                    setLastValidationResult(payload);
+                    loadRecentValidations();
+                }}
+            />
         </Box>
     );
 };

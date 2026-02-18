@@ -8,7 +8,7 @@ from pdf2image import convert_from_bytes
 
 from app.clients.bedrock_client import get_bedrock_runtime_client
 from app.clients.s3_client import get_s3_client
-from app.schemas.document_schema import NovaAnalysisResponse
+from app.schemas.document_schema import NovaAnalysisResponse, StatementTransactionsResponse
 from app.config import settings
 
 logger = logging.getLogger("uvicorn")
@@ -19,7 +19,7 @@ class DocumentService:
         self.bedrock = get_bedrock_runtime_client()
         self.s3 = get_s3_client()
         self.model_id = "amazon.nova-pro-v1:0"
-        self.max_pdf_pages = 5
+        self.max_pdf_pages = 20
 
     def _extract_json_payload(self, output_text: str) -> str:
         text = output_text.strip()
@@ -107,7 +107,7 @@ class DocumentService:
 
         # 3. Prepare the multimodal request for Nova 2 Pro
         prompt = """
-        Analyze this credit card document carefully. 
+        Analyze this credit card document carefully.
         Extract all reward rules, specifically cashback percentages, point multipliers, and merchant-specific benefits.
         Return ONLY a JSON object that matches this structure:
         {
@@ -158,3 +158,65 @@ class DocumentService:
         except Exception as e:
             logger.error(f"Nova Analysis Failed: {str(e)}")
             raise e
+
+    async def extract_statement_transactions(
+        self,
+        s3_key: str,
+        bucket: str | None,
+        limit: int = 30,
+    ) -> StatementTransactionsResponse:
+        target_bucket = bucket or settings.effective_s3_bucket
+        requested_limit = max(1, min(limit, 30))
+
+        s3_response = self.s3.get_object(Bucket=target_bucket, Key=s3_key)
+        source_bytes = s3_response["Body"].read()
+        content_type = s3_response.get("ContentType")
+        image_content_blocks = self._build_image_content_blocks(source_bytes, s3_key, content_type)
+
+        prompt = f"""
+        This is a credit-card statement.
+        Extract transaction rows into JSON.
+
+        Return ONLY this JSON object shape:
+        {{
+          "transactions": [
+            {{
+              "date": "string",
+              "merchant": "string",
+              "amount": float
+            }}
+          ]
+        }}
+
+        Extraction rules:
+        - Include only purchase/spend transactions (exclude payments, fees, reversals, and refunds).
+        - Amount must be positive numeric values with no currency symbol.
+        - Merchant should be concise and readable.
+        - Keep the order exactly as shown in the statement (most recent first if statement is in that order).
+        - Return at most {requested_limit} transactions.
+        """
+
+        message = {
+            "role": "user",
+            "content": image_content_blocks + [{"text": prompt}],
+        }
+
+        try:
+            response = self.bedrock.converse(**self._build_converse_kwargs(message))
+            output_text = response["output"]["message"]["content"][0]["text"]
+            try:
+                data = self._parse_model_json(output_text)
+            except JSONDecodeError:
+                logger.warning("Malformed JSON for statement extraction. Requesting JSON repair retry.")
+                repaired_text = self._repair_json_via_nova(output_text)
+                data = self._parse_model_json(repaired_text)
+
+            parsed = StatementTransactionsResponse(**data)
+            filtered = [
+                tx for tx in parsed.transactions
+                if tx.merchant.strip() and float(tx.amount) > 0
+            ]
+            return StatementTransactionsResponse(transactions=filtered[:requested_limit])
+        except Exception as exc:
+            logger.error("Statement transaction extraction failed for %s: %s", s3_key, exc)
+            raise

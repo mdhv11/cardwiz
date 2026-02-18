@@ -28,6 +28,10 @@ public class RecommendationDTO {
     private List<Long> missingCardIds;
     @JsonProperty("has_sufficient_data")
     private Boolean hasSufficientData;
+    @JsonProperty("routing_mode")
+    private String routingMode;
+    @JsonProperty("routing_reason")
+    private String routingReason;
 
     @Data
     @NoArgsConstructor

@@ -7,6 +7,8 @@ import com.cardwiz.userservice.dtos.IngestCallbackRequestDTO;
 import com.cardwiz.userservice.dtos.IngestRequestDTO;
 import com.cardwiz.userservice.dtos.RecommendationDTO;
 import com.cardwiz.userservice.dtos.RecommendationRequestDTO;
+import com.cardwiz.userservice.dtos.StatementMissedSavingsRequestDTO;
+import com.cardwiz.userservice.dtos.StatementMissedSavingsResponseDTO;
 import com.cardwiz.userservice.dtos.UserCardRequest;
 import com.cardwiz.userservice.dtos.UserCardResponse;
 import com.cardwiz.userservice.dtos.UserResponseDTO;
@@ -24,6 +26,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.HttpStatus;
@@ -247,6 +250,40 @@ public class CardController {
         );
 
         return ResponseEntity.ok(aiServiceClient.getRecommendation(enrichedRequest));
+    }
+
+    @PostMapping("/statement-missed-savings")
+    public ResponseEntity<StatementMissedSavingsResponseDTO> analyzeStatementMissedSavings(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("actualCardId") Long actualCardId,
+            @RequestParam(value = "currency", defaultValue = "INR") String currency,
+            @RequestParam(value = "contextNotes", required = false) String contextNotes,
+            @RequestParam(value = "limitTransactions", defaultValue = "30") Integer limitTransactions) {
+        UserResponseDTO current = userService.getUserProfileByEmail(userDetails.getUsername());
+        Long userId = Long.valueOf(current.getId());
+        List<Long> eligibleCardIds = resolveEligibleCardIds(userId, null);
+
+        if (eligibleCardIds.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No active cards found for this user.");
+        }
+        if (actualCardId == null || !eligibleCardIds.contains(actualCardId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "actualCardId must be one of your active cards.");
+        }
+
+        String s3Key = imageUploadService.uploadDocument(file, userId);
+        StatementMissedSavingsRequestDTO request = new StatementMissedSavingsRequestDTO(
+                userId,
+                s3Key,
+                actualCardId,
+                eligibleCardIds,
+                imageUploadService.getDocumentBucketName(),
+                StringUtils.hasText(currency) ? currency.toUpperCase(Locale.ROOT) : "INR",
+                contextNotes,
+                limitTransactions == null ? 30 : Math.max(1, Math.min(30, limitTransactions))
+        );
+
+        return ResponseEntity.ok(aiServiceClient.analyzeStatementMissedSavings(request));
     }
 
     private String mergeContextNotes(String requestContext, String historyContext) {

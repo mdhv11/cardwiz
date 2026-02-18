@@ -11,6 +11,8 @@ const Advisor = () => {
     const [isClearingHistory, setIsClearingHistory] = useState(false);
     const [toast, setToast] = useState({ open: false, severity: 'success', message: '' });
     const [selectedCurrency, setSelectedCurrency] = useState('INR');
+    const [statementCards, setStatementCards] = useState([]);
+    const [selectedStatementCardId, setSelectedStatementCardId] = useState('');
     const [recentValidations, setRecentValidations] = useState([]);
     const [pendingClarification, setPendingClarification] = useState(null);
 
@@ -33,6 +35,18 @@ const Advisor = () => {
 
     const pushBotMessage = async (text, persist = true) => {
         await appendMessage('bot', text, persist);
+    };
+
+    const pushBotStructuredMessage = async (type, payload, fallbackText) => {
+        setMessages((prev) => [...prev, { sender: 'bot', type, payload, text: fallbackText }]);
+        if (!fallbackText) {
+            return;
+        }
+        try {
+            await axiosClient.post('/advisor/history', { sender: 'bot', text: fallbackText });
+        } catch (_) {
+            // Keep chat responsive even if history persistence fails.
+        }
     };
 
     const extractErrorMessage = (error, fallback) => {
@@ -157,6 +171,24 @@ const Advisor = () => {
         return `Best card: ${recommendation.cardName}. Reward: ${reward}. Why: ${reason}`;
     };
 
+    const formatMissedSavingsSummary = (payload) => {
+        const summary = payload?.summary || {};
+        const currency = summary.currency || selectedCurrency;
+        const txCount = Number(summary.transactions_analyzed ?? 0);
+        const spend = Number(summary.total_spend ?? 0);
+        const actual = Number(summary.total_actual_rewards ?? 0);
+        const optimal = Number(summary.total_optimal_rewards ?? 0);
+        const missed = Number(summary.total_missed_savings ?? 0);
+
+        return [
+            `Statement analysis complete for ${txCount} transactions.`,
+            `Total spend: ${currency} ${spend.toFixed(2)}.`,
+            `Actual rewards: ${currency} ${actual.toFixed(2)}.`,
+            `Optimal rewards: ${currency} ${optimal.toFixed(2)}.`,
+            `Missed savings: ${currency} ${missed.toFixed(2)}.`
+        ].join(' ');
+    };
+
     const handleSendMessage = async (text, options = {}) => {
         await appendMessage('user', text);
         const lower = text.trim().toLowerCase();
@@ -232,31 +264,56 @@ const Advisor = () => {
             return;
         }
 
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('documentType', 'STATEMENT');
-
         setIsUploading(true);
         try {
-            const response = await axiosClient.post('/cards/documents/analyze', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
-            const analysis = response.data?.analysis;
-            const summary = analysis?.aiSummary || response.data?.aiSummary;
-            const extractedRules = Array.isArray(analysis?.extractedRules) ? analysis.extractedRules : [];
+            if (extension === 'pdf') {
+                if (!selectedStatementCardId) {
+                    await pushBotMessage('Select the card you used for this statement before uploading the PDF.');
+                    return;
+                }
 
-            if (summary) {
-                await pushBotMessage(`Document analyzed. ${summary}`);
+                const contextNotes = recentValidations
+                    .slice(0, 5)
+                    .map((tx) => `${tx.merchant || 'merchant'}:${tx.category || 'general'}:${tx.currency || selectedCurrency}:${tx.amount ?? 0}`)
+                    .join(' ; ');
+
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('actualCardId', String(selectedStatementCardId));
+                formData.append('currency', selectedCurrency);
+                formData.append('contextNotes', contextNotes);
+                formData.append('limitTransactions', '30');
+
+                const response = await axiosClient.post('/cards/statement-missed-savings', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+                const summaryText = formatMissedSavingsSummary(response.data);
+                await pushBotStructuredMessage('missed-savings-report', response.data, summaryText);
             } else {
-                await pushBotMessage('Document uploaded and analyzed successfully.');
-            }
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('documentType', 'STATEMENT');
 
-            if (extractedRules.length > 0) {
-                const preview = extractedRules
-                    .slice(0, 3)
-                    .map((rule) => `${rule.cardName}: ${rule.rewardRate} ${rule.rewardType} on ${rule.category}`)
-                    .join(' | ');
-                await pushBotMessage(`Top extracted rules: ${preview}`);
+                const response = await axiosClient.post('/cards/documents/analyze', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+                const analysis = response.data?.analysis;
+                const summary = analysis?.aiSummary || response.data?.aiSummary;
+                const extractedRules = Array.isArray(analysis?.extractedRules) ? analysis.extractedRules : [];
+
+                if (summary) {
+                    await pushBotMessage(`Document analyzed. ${summary}`);
+                } else {
+                    await pushBotMessage('Document uploaded and analyzed successfully.');
+                }
+
+                if (extractedRules.length > 0) {
+                    const preview = extractedRules
+                        .slice(0, 3)
+                        .map((rule) => `${rule.cardName}: ${rule.rewardRate} ${rule.rewardType} on ${rule.category}`)
+                        .join(' | ');
+                    await pushBotMessage(`Top extracted rules: ${preview}`);
+                }
             }
         } catch (error) {
             await pushBotMessage(extractErrorMessage(error, 'Document upload or analysis failed. Please try again.'));
@@ -331,6 +388,23 @@ const Advisor = () => {
         loadRecentValidations();
     }, []);
 
+    useEffect(() => {
+        const loadCards = async () => {
+            try {
+                const response = await axiosClient.get('/cards');
+                const cards = (Array.isArray(response.data) ? response.data : []).filter((card) => card?.active);
+                setStatementCards(cards);
+                if (cards.length > 0) {
+                    setSelectedStatementCardId((prev) => prev || String(cards[0].id));
+                }
+            } catch (_) {
+                setStatementCards([]);
+                setSelectedStatementCardId('');
+            }
+        };
+        loadCards();
+    }, []);
+
     return (
         <Box sx={{ height: 'calc(100vh - 100px)' }}> {/* Adjust for layout padding */}
             <SmartAdvisor
@@ -341,6 +415,9 @@ const Advisor = () => {
                 currencies={supportedCurrencies}
                 selectedCurrency={selectedCurrency}
                 onCurrencyChange={setSelectedCurrency}
+                statementCards={statementCards}
+                selectedStatementCardId={selectedStatementCardId}
+                onStatementCardChange={setSelectedStatementCardId}
                 isAnalyzing={isAnalyzing || isHistoryLoading}
                 isUploading={isUploading}
                 isClearingHistory={isClearingHistory}

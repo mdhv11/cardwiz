@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Default to localhost, but allow override via env var
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/cardwiz"
     VECTOR_TOP_K: int = 5
+    HYBRID_VECTOR_WEIGHT: float = 0.7
+    HYBRID_KEYWORD_WEIGHT: float = 0.3
+    HYBRID_FTS_LANGUAGE: str = "english"
 
     # Redis Cache Config
     REDIS_ENABLED: bool = True
@@ -54,6 +57,12 @@ class Settings(BaseSettings):
     # Recommendation reasoning model config
     RECOMMENDATION_PRIMARY_MODEL_ID: str = "amazon.nova-lite-v1:0"
     RECOMMENDATION_FALLBACK_MODEL_ID: Optional[str] = "amazon.nova-micro-v1:0"
+
+    # Agentic recommendation config
+    AGENT_ENABLED: bool = True
+    AGENT_MODEL_ID: str = "us.amazon.nova-pro-v1:0"
+    AGENT_MAX_TOOL_ITERATIONS: int = 4
+    AGENT_COMPLEX_SPEND_THRESHOLD: float = 5000.0
 
     # Kafka async ingestion config
     KAFKA_ENABLED: bool = False

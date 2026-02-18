@@ -1,193 +1,187 @@
-💳 CardWiz (RewardWiz)
+# CardWiz
 
-The Multimodal Credit Card Reward Strategist
+AI-powered credit card rewards optimizer with a React web app, Spring Boot API gateway/orchestrator, and a FastAPI AI service.
 
-CardWiz is an AI-powered financial platform designed to solve the complexity of credit card reward systems. By leveraging the Amazon Nova 2 model family, CardWiz transforms messy PDF brochures and bank statements into actionable, real-time spending advice.
+## What the Web App Can Do
 
-## 🏗 System Architecture
+### Authentication and session
+- Register and sign in with JWT auth.
+- Protected app routes via auth guard (`/dashboard`, `/cards`, `/advisor`, `/profile`).
+- Persistent session token in browser local storage.
 
-CardWiz uses a Polyglot Microservice architecture designed for the Amazon Nova Hackathon.
+### Dashboard
+- Personalized welcome snapshot.
+- Quick view of user cards.
+- Recent transaction validations with status chips:
+  - `MATCHED` (used best card)
+  - `MISSED` (better card available)
+  - `NOT_SET`
+- Add validation flow from dashboard (`merchant`, `amount`, `category`, `currency`, optional `actualCardId`, date).
 
-### 1. 🌐 Service Registry (Netflix Eureka)
-The service discovery hub that enables microservices to find and communicate with each other.
+### Cards (wallet)
+- Add and list cards (`cardName`, `issuer`, `network`, `lastFourDigits`, `active`).
+- Card knowledge readiness state per card:
+  - `Knowledge Ready`
+  - `AI Analyzing...`
+  - `Analysis Failed`
+  - `No Docs Indexed`
+- Upload card T&C/statement documents per card for async AI ingestion.
+- Polling for ingestion status updates.
+- Card comparison flow:
+  - Select multiple active cards
+  - Enter merchant/category/amount/currency context
+  - View winner + comparison table + missing-data warning
 
-- **Responsibilities**: Service discovery and health monitoring for the ecosystem
-- **Port**: 8761
-- **Technology**: Spring Boot, Netflix Eureka
+### Smart Advisor
+- Chat-style recommendation interface.
+- Context-aware clarification prompts when merchant/amount are missing.
+- Currency-aware recommendations (`INR`, `USD`, `EUR`, `GBP`, `AED`, `SGD`).
+- Persisted advisor history (load, append, clear).
+- Upload-based AI workflows:
+  - `PDF`: statement missed-savings analysis
+  - `Image/PDF`: document analysis and reward-rule extraction preview
+- File guardrails in UI:
+  - Allowed: `pdf`, `jpg`, `jpeg`, `png`, `webp`
+  - Max size: `20 MB`
 
-### 2. 🧭 Spring Boot Orchestrator (Gateway + Security + State)
-The API gateway and system brain for request routing, access control, and core state.
+### Profile
+- View and update first/last name.
+- View stored email and avatar URL if present.
 
-- **Responsibilities**: 
-  - Gateway + JWT Authentication (Spring Security)
-  - User/card management (store which cards a user owns)
-  - Reward Knowledge Base persistence (vector IDs from Nova)
-  - PostgreSQL persistence for user and reward metadata
-  - Service discovery + typed calls to Python AI via Spring Cloud OpenFeign
-- **Port**: 8080
-- **Technology**: Java 17+, Spring Boot 3.x, Spring Security, Spring Cloud OpenFeign, PostgreSQL
+## AI and Recommendation Capabilities
 
-### 3. 🧠 Python AI Microservice (Nova Engine)
-The "Muscle" for all things AI. Built in Python to natively leverage the AWS Boto3 SDK for Amazon Nova.
+- Multimodal document parsing (Bedrock Nova) for reward rules.
+- Rule extraction normalization:
+  - Cashback percentages
+  - Points-based rules with effective percentage derivation
+- Embedding sync + vector search (`pgvector`) for rule retrieval.
+- Hybrid recommendation routing:
+  - Deterministic fast-path
+  - LLM reranking (Nova Lite)
+  - Agentic tool-calling path for complex/high-spend queries
+- Statement missed-savings analysis across actual-vs-optimal card choice.
 
-- **Responsibilities**: 
-  - Document analysis (Nova 2 Pro) for complex, multi-column statements
-  - Reward RAG via Nova Multimodal Embeddings (vectorize card benefit PDFs)
-  - Similarity search for reward recommendations
-- **Port**: 8000
-- **Technology**: Python 3.10+, FastAPI, Boto3 (AWS SDK)
+## Architecture
 
-## 🚀 Key Features
+- `client/`: React + Vite + MUI + Redux Toolkit
+- `cardwiz-backend/service-registry/`: Eureka server (`:8761`)
+- `cardwiz-backend/user-service/`: Spring Boot API + auth + domain + gateway (`:8080`)
+- `cardwiz-backend/ai-service/`: FastAPI AI service (`:8000`)
+- `cardwiz-backend/docker-compose.infra.yml`: local infra (Postgres+pgvector, Redis, MinIO, Kafka, Zookeeper, pgAdmin)
 
-- **Multimodal Extraction**: Upload a picture or document (PDF) of a credit card offer or a monthly statement. The Python service uses Nova 2 Pro to extract complex cashback tables without manual data entry.
+## Tech Stack
 
-- **Intelligent Merchant Mapping**: Uses Nova Multimodal Embeddings to understand that a transaction at "AMZN MKTP" should be routed to the card with the best "Online Shopping" or "Amazon" rewards.
+- Frontend: React 18, Vite, MUI, Redux Toolkit, Axios
+- Backend: Java 21, Spring Boot 3, Spring Security JWT, Spring Cloud Gateway MVC, Eureka, JPA
+- AI Service: FastAPI, Boto3 (Amazon Bedrock), pgvector, Redis, aiokafka
+- Data/Infra: PostgreSQL (pgvector), Redis, MinIO (S3-compatible), Kafka
 
-- **Deterministic + Probabilistic Hybrid**: Standard rules (like "5% on Flipkart") are handled by Java logic, while complex scenarios are handled by the AI reasoning agent.
+## Key API Surface (used by web app)
 
-- **Secure Authentication**: JWT-based authentication with Spring Security for secure user sessions.
+### Auth
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/authenticate`
 
-- **Profile Management**: User profile management with S3 integration for profile image uploads.
+### Users
+- `GET /api/v1/users/me`
+- `PUT /api/v1/users/me`
+- `POST /api/v1/users/change-password`
+- `DELETE /api/v1/users/me`
 
-## 🛠 Tech Stack
+### Cards
+- `GET /api/v1/cards`
+- `POST /api/v1/cards`
+- `PUT /api/v1/cards/{cardId}`
+- `DELETE /api/v1/cards/{cardId}`
+- `POST /api/v1/cards/recommendations`
+- `GET /api/v1/cards/knowledge-coverage`
+- `POST /api/v1/cards/{cardId}/documents/analyze`
+- `GET /api/v1/cards/documents/{documentId}/status`
+- `POST /api/v1/cards/documents/analyze`
+- `POST /api/v1/cards/statement-missed-savings`
 
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | React (Vite), Tailwind CSS, Axios _(Coming Soon)_ |
-| **Backend (Orchestrator)** | Java 17+, Spring Boot 3.x, Spring Security (JWT), Spring Cloud OpenFeign, Eureka Client |
-| **Backend (Service Registry)** | Spring Boot 3.x, Netflix Eureka Server |
-| **Backend (AI Service)** | Python 3.10+, FastAPI, Boto3 (AWS SDK) |
-| **AI Models** | Amazon Nova 2 Pro, Nova Multimodal Embeddings |
-| **Database** | PostgreSQL (with pgvector) |
-| **Cloud** | Amazon Bedrock, Amazon S3 |
+### Transactions and validation
+- `GET /api/v1/transactions`
+- `POST /api/v1/transactions`
+- `PUT /api/v1/transactions/{transactionId}`
+- `DELETE /api/v1/transactions/{transactionId}`
+- `POST /api/v1/transactions/validate`
 
-## 📂 Project Structure
+### Advisor history
+- `GET /api/v1/advisor/history`
+- `POST /api/v1/advisor/history`
+- `DELETE /api/v1/advisor/history`
 
+### AI service
+- `GET /health`
+- `POST /ai/v1/documents/analyze`
+- `POST /ai/v1/recommend/rank`
+- `POST /ai/v1/recommend/statement-missed-savings`
+- `POST /ai/v1/embeddings/sync`
+- `POST /ai/v1/embeddings/coverage`
+
+## Local Development
+
+### 1) Prerequisites
+- Node.js 18+
+- Java 21+
+- Maven 3.9+
+- Python 3.10+
+- Docker + Docker Compose
+- AWS Bedrock access (for real AI model calls)
+
+### 2) Start infra
+```bash
+cd cardwiz-backend
+docker compose -f docker-compose.infra.yml up -d
 ```
-cardwiz/
-├── cardwiz-backend/
-│   ├── service-registry/      # Eureka Server (Port 8761)
-│   │   ├── src/main/java/com/epoch/service_registry/
-│   │   ├── Dockerfile
-│   │   └── pom.xml
-│   ├── orchestrator-service/  # Gateway + Security + State (Port 8080)
-│   │   ├── src/main/java/com/epoch/orchestrator/
-│   │   │   ├── controllers/   # REST API endpoints
-│   │   │   ├── services/      # Business logic
-│   │   │   ├── security/      # JWT & Auth logic
-│   │   │   ├── models/        # JPA entities
-│   │   │   ├── repositories/  # Data access layer
-│   │   │   ├── dtos/          # Data transfer objects
-│   │   │   └── config/        # Spring configuration
-│   │   ├── Dockerfile
-│   │   ├── .env
-│   │   └── pom.xml
-│   └── pom.xml                # Parent POM
-├── ai-service/                # Python + FastAPI
-├── frontend/                  # React + Tailwind (Coming Soon)
-└── docker-compose.yml         # Local dev orchestration (Coming Soon)
+
+### 3) Start service registry
+```bash
+cd cardwiz-backend/service-registry
+./mvnw spring-boot:run
 ```
 
-## 🛠 Setup & Development
+### 4) Start user-service
+```bash
+cd cardwiz-backend/user-service
+./mvnw spring-boot:run
+```
 
-### Prerequisites
+### 5) Start ai-service
+```bash
+cd cardwiz-backend/ai-service
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-- **Java 17+** installed
-- **Maven 3.6+** installed
-- **PostgreSQL** database running
-- **AWS Account** with Bedrock access (for AI features)
-- **AWS S3 Bucket** for image uploads
+### 6) Start frontend
+```bash
+cd client
+npm install
+npm run dev
+```
 
-### Environment Setup
+Vite proxies `/api/*` to `http://localhost:8080`.
 
-1. **Configure Orchestrator Service Environment**
-   
-   Create a `.env` file in `cardwiz-backend/orchestrator-service/` with:
-   ```env
-   DB_URL=jdbc:postgresql://localhost:5432/cardwiz
-   DB_USERNAME=your_db_username
-   DB_PASSWORD=your_db_password
-   JWT_SECRET=your_jwt_secret_key_here
-   JWT_EXPIRATION=86400000
-   AWS_ACCESS_KEY_ID=your_aws_access_key
-   AWS_SECRET_ACCESS_KEY=your_aws_secret_key
-   AWS_REGION=us-east-1
-   S3_BUCKET_NAME=your_s3_bucket_name
-   ```
+## Environment Notes
 
-2. **Database Setup**
-   
-   Create a PostgreSQL database:
-   ```sql
-   CREATE DATABASE cardwiz;
-   ```
+- `user-service` reads config from:
+  - `cardwiz-backend/user-service/.env`
+  - defaults in `application.properties`
+- `ai-service` reads config from:
+  - `cardwiz-backend/ai-service/.env`
+  - defaults in `app/config.py`
 
-### Running the Services
+Important vars you will likely set:
+- Bedrock/AWS credentials and region
+- S3/MinIO endpoint + keys + bucket
+- DB and Redis connection values
+- Kafka toggle and brokers (if using async ingestion)
+- AI callback secret parity between services
 
-#### Option 1: Run with Maven
+## Current Status
 
-1. **Start Service Registry** (must start first)
-   ```bash
-   cd cardwiz-backend/service-registry
-   ./mvnw spring-boot:run
-   ```
-   Service will be available at: `http://localhost:8761`
-
-2. **Start Orchestrator Service**
-   ```bash
-   cd cardwiz-backend/orchestrator-service
-   ./mvnw spring-boot:run
-   ```
-   Service will be available at: `http://localhost:8080`
-
-#### Option 2: Build and Run JARs
-
-1. **Build all services**
-   ```bash
-   cd cardwiz-backend
-   mvn clean package
-   ```
-
-2. **Run Service Registry**
-   ```bash
-   java -jar service-registry/target/service-registry-0.0.1-SNAPSHOT.jar
-   ```
-
-3. **Run Orchestrator Service**
-   ```bash
-   java -jar orchestrator-service/target/orchestrator-service-0.0.1-SNAPSHOT.jar
-   ```
-
-### API Endpoints
-
-#### Authentication Endpoints
-- `POST /api/v1/auth/register` - Register new user
-- `POST /api/v1/auth/authenticate` - Login user
-
-#### Orchestrator Endpoints (Requires JWT)
-- `GET /api/v1/users/me` - Get current user profile
-- `PUT /api/v1/users/me` - Update user profile
-- `POST /api/v1/users/change-password` - Change password
-- `POST /api/v1/users/upload-image` - Upload profile image
-
-### Monitoring
-
-- **Eureka Dashboard**: `http://localhost:8761`
-- Check registered services and their health status
-
-## 🚧 Roadmap
-
-- [ ] AI Service with Amazon Nova integration
-- [ ] Credit card management endpoints
-- [ ] Transaction tracking and analysis
-- [ ] Reward optimization recommendations
-- [ ] Frontend React application
-- [ ] Docker Compose setup for easy deployment
-
-## 📝 License
-
-This project is built for the Amazon Nova Hackathon.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+This README reflects implemented functionality in the current codebase (frontend routes, controllers, and AI service flows), replacing older roadmap-only or placeholder sections.

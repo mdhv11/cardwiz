@@ -34,3 +34,13 @@ class AnalyzeDocumentRequest(BaseModel):
     docId: int
     s3Key: str
     bucket: Optional[str] = None
+
+
+class StatementTransaction(BaseModel):
+    date: str = Field(..., description="Transaction date as seen on statement")
+    merchant: str = Field(..., description="Merchant or transaction label")
+    amount: float = Field(..., gt=0, description="Transaction amount in statement currency")
+
+
+class StatementTransactionsResponse(BaseModel):
+    transactions: List[StatementTransaction] = Field(default_factory=list)

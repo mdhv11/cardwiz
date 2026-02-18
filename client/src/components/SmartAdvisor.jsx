@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     Box,
+    Collapse,
     Paper,
     Typography,
     TextField,
@@ -12,7 +13,8 @@ import {
     ListItem,
     Avatar,
     CircularProgress,
-    Tooltip
+    Tooltip,
+    Button
 } from '@mui/material';
 import {
     Send as SendIcon,
@@ -29,14 +31,64 @@ const SmartAdvisor = ({
     currencies = [],
     selectedCurrency = 'INR',
     onCurrencyChange,
+    statementCards = [],
+    selectedStatementCardId = '',
+    onStatementCardChange,
     messages,
     isAnalyzing,
     isUploading = false,
     isClearingHistory = false
 }) => {
     const [input, setInput] = useState('');
+    const [expandedReports, setExpandedReports] = useState({});
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
+
+    const toggleReport = (key) => {
+        setExpandedReports((prev) => ({ ...prev, [key]: !prev[key] }));
+    };
+
+    const renderMissedSavingsCard = (payload, expanded, onToggle) => {
+        const summary = payload?.summary || {};
+        const currency = summary.currency || selectedCurrency;
+        const rows = Array.isArray(payload?.transactions) ? payload.transactions : [];
+        const topRows = [...rows]
+            .sort((a, b) => Number(b?.missed_value ?? 0) - Number(a?.missed_value ?? 0))
+            .slice(0, 5);
+
+        return (
+            <Box sx={{ minWidth: 320 }}>
+                <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    Missed Savings Report
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    Transactions: {Number(summary.transactions_analyzed ?? 0)} | Spend: {currency} {Number(summary.total_spend ?? 0).toFixed(2)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                    Actual: {currency} {Number(summary.total_actual_rewards ?? 0).toFixed(2)} | Optimal: {currency} {Number(summary.total_optimal_rewards ?? 0).toFixed(2)}
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.75 }}>
+                    Total missed: {currency} {Number(summary.total_missed_savings ?? 0).toFixed(2)}
+                </Typography>
+                {topRows.length > 0 && (
+                    <>
+                        <Button size="small" onClick={onToggle} sx={{ px: 0, minWidth: 0, mb: expanded ? 0.5 : 0 }}>
+                            {expanded ? 'Hide details' : 'Show top opportunities'}
+                        </Button>
+                        <Collapse in={expanded} timeout="auto" unmountOnExit>
+                            <Box sx={{ borderTop: '1px solid rgba(255, 255, 255, 0.12)', pt: 0.75 }}>
+                                {topRows.map((row, idx) => (
+                                    <Typography key={`${row?.merchant || 'row'}-${idx}`} variant="caption" sx={{ display: 'block', mb: 0.35 }}>
+                                        {row?.merchant || 'Merchant'}: +{currency} {Number(row?.missed_value ?? 0).toFixed(2)} ({row?.actual_card_name || 'Current'} {'->'} {row?.optimal_card_name || 'Optimal'})
+                                    </Typography>
+                                ))}
+                            </Box>
+                        </Collapse>
+                    </>
+                )}
+            </Box>
+        );
+    };
 
     const handleSend = () => {
         if (input.trim()) {
@@ -149,7 +201,13 @@ const SmartAdvisor = ({
                                     color: msg.sender === 'user' ? 'white' : 'text.primary'
                                 }}
                             >
-                                <Typography variant="body2">{msg.text}</Typography>
+                                {msg?.type === 'missed-savings-report'
+                                    ? renderMissedSavingsCard(
+                                        msg.payload,
+                                        !!expandedReports[index],
+                                        () => toggleReport(index)
+                                    )
+                                    : <Typography variant="body2">{msg.text}</Typography>}
                             </Paper>
                         </Box>
                     </ListItem>
@@ -230,6 +288,28 @@ const SmartAdvisor = ({
                             {currencies.map((currency) => (
                                 <MenuItem key={currency} value={currency}>{currency}</MenuItem>
                             ))}
+                        </Select>
+                    </FormControl>
+                    <FormControl size="small" sx={{ minWidth: 170 }}>
+                        <Select
+                            value={selectedStatementCardId}
+                            onChange={(e) => onStatementCardChange?.(e.target.value)}
+                            displayEmpty
+                            disabled={isAnalyzing || isUploading || isClearingHistory || statementCards.length === 0}
+                            sx={{
+                                borderRadius: 4,
+                                bgcolor: 'rgba(255, 255, 255, 0.05)'
+                            }}
+                        >
+                            {statementCards.length === 0 ? (
+                                <MenuItem value="" disabled>No active card</MenuItem>
+                            ) : (
+                                statementCards.map((card) => (
+                                    <MenuItem key={card.id} value={String(card.id)}>
+                                        {card.cardName}
+                                    </MenuItem>
+                                ))
+                            )}
                         </Select>
                     </FormControl>
                     <IconButton

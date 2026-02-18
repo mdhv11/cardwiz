@@ -82,3 +82,43 @@ class EmbeddingCoverageRequest(BaseModel):
 
 class EmbeddingCoverageResponse(BaseModel):
     coveredCardIds: List[int] = Field(default_factory=list)
+
+
+class StatementMissedSavingsRequest(BaseModel):
+    userId: int
+    statementS3Key: str
+    actualCardId: int
+    availableCardIds: List[int]
+    bucket: Optional[str] = None
+    currency: Optional[str] = Field("INR", example="INR")
+    contextNotes: Optional[str] = None
+    limitTransactions: int = Field(30, ge=1, le=30)
+
+
+class StatementTransactionReport(BaseModel):
+    date: str
+    merchant: str
+    amount: float
+    actual_card_id: int
+    actual_card_name: str
+    actual_reward_value: float
+    actual_reward_source: str = "ENGINE_ESTIMATE"
+    optimal_card_id: int
+    optimal_card_name: str
+    optimal_reward_value: float
+    missed_value: float
+
+
+class StatementMissedSavingsSummary(BaseModel):
+    transactions_analyzed: int
+    total_spend: float
+    total_actual_rewards: float
+    total_optimal_rewards: float
+    total_missed_savings: float
+    currency: str
+
+
+class StatementMissedSavingsResponse(BaseModel):
+    statement_s3_key: str
+    summary: StatementMissedSavingsSummary
+    transactions: List[StatementTransactionReport] = Field(default_factory=list)

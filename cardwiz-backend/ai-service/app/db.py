@@ -16,5 +16,12 @@ def init_db():
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         Base.metadata.create_all(bind=engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS reward_rule_vector_fts_idx "
+                    "ON reward_rule_vectors USING gin (to_tsvector('english', coalesce(content_text, '')))"
+                )
+            )
     except Exception as exc:
         logger.warning("Database initialization skipped: %s", exc)

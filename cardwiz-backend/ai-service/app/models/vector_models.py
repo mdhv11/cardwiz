@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text, Index
+from sqlalchemy import Column, Integer, Text, Index, func
 from sqlalchemy.ext.declarative import declarative_base
 from pgvector.sqlalchemy import Vector
 
@@ -22,5 +22,10 @@ class RewardRuleVector(Base):
             postgresql_using='hnsw',
             postgresql_with={'m': 16, 'ef_construction': 64},
             postgresql_ops={'embedding': 'vector_cosine_ops'}
+        ),
+        Index(
+            "reward_rule_vector_fts_idx",
+            func.to_tsvector("english", content_text),
+            postgresql_using="gin",
         ),
     )

@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Default to localhost, but allow override via env var
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/cardwiz"
     VECTOR_TOP_K: int = 5
+    HYBRID_VECTOR_WEIGHT: float = 0.7
+    HYBRID_KEYWORD_WEIGHT: float = 0.3
+    HYBRID_FTS_LANGUAGE: str = "english"
 
     # Redis Cache Config
     REDIS_ENABLED: bool = True

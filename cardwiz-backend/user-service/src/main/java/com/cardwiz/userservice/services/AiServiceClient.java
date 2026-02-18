@@ -8,6 +8,8 @@ import com.cardwiz.userservice.dtos.EmbeddingCoverageRequestDTO;
 import com.cardwiz.userservice.dtos.EmbeddingCoverageResponseDTO;
 import com.cardwiz.userservice.dtos.RecommendationDTO;
 import com.cardwiz.userservice.dtos.RecommendationRequestDTO;
+import com.cardwiz.userservice.dtos.StatementMissedSavingsRequestDTO;
+import com.cardwiz.userservice.dtos.StatementMissedSavingsResponseDTO;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -89,5 +91,14 @@ public class AiServiceClient {
                 .body(new EmbeddingCoverageRequestDTO(cardIds))
                 .retrieve()
                 .body(EmbeddingCoverageResponseDTO.class);
+    }
+
+    public StatementMissedSavingsResponseDTO analyzeStatementMissedSavings(StatementMissedSavingsRequestDTO request) {
+        return restClientBuilder.build()
+                .post()
+                .uri(aiServiceUrl + "/ai/v1/recommend/statement-missed-savings")
+                .body(request)
+                .retrieve()
+                .body(StatementMissedSavingsResponseDTO.class);
     }
 }

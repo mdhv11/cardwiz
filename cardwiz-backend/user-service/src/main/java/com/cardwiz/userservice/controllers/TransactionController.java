@@ -3,8 +3,11 @@ package com.cardwiz.userservice.controllers;
 import com.cardwiz.userservice.dtos.TransactionRequest;
 import com.cardwiz.userservice.dtos.TransactionResponse;
 import com.cardwiz.userservice.dtos.UserResponseDTO;
+import com.cardwiz.userservice.dtos.ValidationRequestDTO;
+import com.cardwiz.userservice.dtos.ValidationResponseDTO;
 import com.cardwiz.userservice.services.TransactionService;
 import com.cardwiz.userservice.services.UserService;
+import com.cardwiz.userservice.services.ValidationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -20,6 +23,7 @@ public class TransactionController {
 
     private final TransactionService transactionService;
     private final UserService userService;
+    private final ValidationService validationService;
 
     @GetMapping
     public ResponseEntity<List<TransactionResponse>> listTransactions(
@@ -60,5 +64,13 @@ public class TransactionController {
         UserResponseDTO current = userService.getUserProfileByEmail(userDetails.getUsername());
         transactionService.deleteTransaction(Long.valueOf(current.getId()), transactionId);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/validate")
+    public ResponseEntity<ValidationResponseDTO> validateTransaction(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestBody ValidationRequestDTO request) {
+        UserResponseDTO current = userService.getUserProfileByEmail(userDetails.getUsername());
+        return ResponseEntity.ok(validationService.processValidation(Long.valueOf(current.getId()), request));
     }
 }

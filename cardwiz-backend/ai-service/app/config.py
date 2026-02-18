@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     RECOMMENDATION_PRIMARY_MODEL_ID: str = "amazon.nova-lite-v1:0"
     RECOMMENDATION_FALLBACK_MODEL_ID: Optional[str] = "amazon.nova-micro-v1:0"
 
+    # Agentic recommendation config
+    AGENT_ENABLED: bool = True
+    AGENT_MODEL_ID: str = "us.amazon.nova-pro-v1:0"
+    AGENT_MAX_TOOL_ITERATIONS: int = 4
+    AGENT_COMPLEX_SPEND_THRESHOLD: float = 5000.0
+
     # Kafka async ingestion config
     KAFKA_ENABLED: bool = False
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"

@@ -4,6 +4,7 @@ import re
 import uuid
 
 from app.clients.bedrock_client import get_bedrock_runtime_client
+from app.services.agent_service import AgentService
 from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
 from app.schemas.recommendation_schema import (
@@ -26,6 +27,7 @@ logger = logging.getLogger("uvicorn")
 class RecommendationService:
     def __init__(self):
         self.embedding_service = EmbeddingService()
+        self.agent_service = AgentService(self.embedding_service)
         self.document_service = DocumentService()
         self.bedrock = get_bedrock_runtime_client()
         self.model_id = "us.amazon.nova-lite-v1:0"
@@ -102,12 +104,16 @@ Return STRICT JSON only:
             return None
 
     async def get_recommendation(self, request: RecommendationRequest) -> RecommendationResponse:
+        routing_mode = "llm_rerank"
+        routing_reason = "UNSET"
         requested_ids = [int(card_id) for card_id in request.availableCardIds or []]
         covered_ids = sorted(await self.embedding_service.get_card_rule_coverage(requested_ids))
         missing_ids = sorted(set(requested_ids) - set(covered_ids))
         has_sufficient_data = len(covered_ids) >= 2 if len(requested_ids) >= 2 else len(covered_ids) >= 1
 
         if not request.availableCardIds:
+            routing_mode = "none"
+            routing_reason = "NO_AVAILABLE_CARDS"
             empty_best = CardRecommendation(
                 cardId=-1,
                 cardName="Unknown",
@@ -132,6 +138,8 @@ Return STRICT JSON only:
                 covered_card_ids=covered_ids,
                 missing_card_ids=missing_ids,
                 has_sufficient_data=False,
+                routing_mode=routing_mode,
+                routing_reason=routing_reason,
             )
 
         category = request.category or "general"
@@ -146,6 +154,8 @@ Return STRICT JSON only:
         survivors = [c for c in raw_candidates if c["card_id"] in eligible_ids]
 
         if not survivors:
+            routing_mode = "none"
+            routing_reason = "NO_SURVIVING_RULES"
             fallback_id = request.availableCardIds[0]
             fallback_best = CardRecommendation(
                 cardId=fallback_id,
@@ -167,20 +177,44 @@ Return STRICT JSON only:
                 covered_card_ids=covered_ids,
                 missing_card_ids=missing_ids,
                 has_sufficient_data=has_sufficient_data,
+                routing_mode=routing_mode,
+                routing_reason=routing_reason,
             )
 
-        prompt = self._build_math_aware_prompt(
-            merchant=request.merchantName,
-            category=category,
-            amount=spend,
-            currency=currency,
-            context_notes=context_notes,
-            candidates=survivors[:5],
-        )
-        decision = await self._get_llm_decision(prompt)
+        decision = None
+        should_use_agent, initial_mode, initial_reason = self.agent_service.get_route_metadata(request)
+        routing_mode = initial_mode
+        routing_reason = initial_reason
+
+        if should_use_agent:
+            decision = await self.agent_service.solve_optimization(request)
+            if decision:
+                routing_mode = "agent"
+                routing_reason = f"{initial_reason}:AGENT_SUCCESS"
+            else:
+                routing_reason = f"{initial_reason}:AGENT_NO_DECISION"
+
+        if not decision and routing_mode == "deterministic":
+            decision = self._deterministic_decision(survivors, spend)
+            routing_reason = f"{routing_reason}:DETERMINISTIC_FASTPATH"
+        elif not decision:
+            prompt = self._build_math_aware_prompt(
+                merchant=request.merchantName,
+                category=category,
+                amount=spend,
+                currency=currency,
+                context_notes=context_notes,
+                candidates=survivors[:5],
+            )
+            decision = await self._get_llm_decision(prompt)
+            if decision:
+                routing_mode = "llm_rerank"
+                routing_reason = f"{routing_reason}:NOVA_LITE_SUCCESS"
 
         if not decision:
             decision = self._deterministic_decision(survivors, spend)
+            routing_mode = "deterministic"
+            routing_reason = f"{routing_reason}:FINAL_DETERMINISTIC_FALLBACK"
 
         winner_card_id = self._pick_winner_card_id(decision, survivors)
         winner = next((s for s in survivors if s["card_id"] == winner_card_id), survivors[0])
@@ -269,6 +303,15 @@ Return STRICT JSON only:
             for item in comparison_table[:3]
         ]
 
+        logger.info(
+            "Recommendation routing mode=%s reason=%s userId=%s merchant=%s cards=%s",
+            routing_mode,
+            routing_reason,
+            request.userId,
+            request.merchantName,
+            len(request.availableCardIds or []),
+        )
+
         return RecommendationResponse(
             recommendation_id=f"rec_{uuid.uuid4().hex[:10]}",
             transaction_context=TransactionContext(
@@ -281,10 +324,15 @@ Return STRICT JSON only:
             comparison_table=comparison_table,
             bestOption=legacy_best,
             alternatives=alternatives,
-            semanticContext=f"Analyzed {len(survivors)} rules using Nova Lite reranking.",
+            semanticContext=(
+                f"Routing={routing_mode}; reason={routing_reason}. "
+                f"Analyzed {len(survivors)} rules."
+            ),
             covered_card_ids=covered_ids,
             missing_card_ids=missing_ids,
             has_sufficient_data=has_sufficient_data,
+            routing_mode=routing_mode,
+            routing_reason=routing_reason,
         )
 
     async def analyze_statement_missed_savings(
@@ -319,7 +367,7 @@ Return STRICT JSON only:
                     category=None,
                     transactionAmount=amount,
                     currency=currency,
-                    contextNotes=request.contextNotes,
+                    contextNotes=(request.contextNotes or "") + " [BULK_EVAL]",
                     availableCardIds=[actual_card_id],
                 )
             )
@@ -330,7 +378,7 @@ Return STRICT JSON only:
                     category=None,
                     transactionAmount=amount,
                     currency=currency,
-                    contextNotes=request.contextNotes,
+                    contextNotes=(request.contextNotes or "") + " [BULK_EVAL]",
                     availableCardIds=card_pool,
                 )
             )

@@ -63,6 +63,8 @@ class RecommendationResponse(BaseModel):
     covered_card_ids: List[int] = Field(default_factory=list)
     missing_card_ids: List[int] = Field(default_factory=list)
     has_sufficient_data: bool = True
+    routing_mode: Optional[str] = None
+    routing_reason: Optional[str] = None
 
 
 class EmbeddingSyncRequest(BaseModel):

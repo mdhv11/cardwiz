@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Box, Snackbar } from '@mui/material';
 import SmartAdvisor from '../components/SmartAdvisor';
-import axiosClient from '../api/axiosClient';
+import axiosClient, { getApiErrorMessage } from '../api/axiosClient';
 
 const Advisor = () => {
     const [messages, setMessages] = useState([]);
@@ -55,11 +55,7 @@ const Advisor = () => {
     };
 
     const extractErrorMessage = (error, fallback) => {
-        let message =
-            error?.response?.data?.message ||
-            error?.response?.data?.detail ||
-            error?.message ||
-            '';
+        let message = getApiErrorMessage(error, fallback);
 
         // Unwrap cases like: "{\"detail\":\"...\"}" or "{\"message\":\"...\"}"
         for (let i = 0; i < 3 && typeof message === 'string'; i += 1) {

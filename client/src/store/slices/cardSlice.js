@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import axiosClient from '../../api/axiosClient';
+import axiosClient, { getApiErrorMessage } from '../../api/axiosClient';
 
 // Thunks
 export const fetchCards = createAsyncThunk(
@@ -9,7 +9,7 @@ export const fetchCards = createAsyncThunk(
             const response = await axiosClient.get('/cards');
             return response.data;
         } catch (error) {
-            return rejectWithValue(error.message);
+            return rejectWithValue(getApiErrorMessage(error, 'Failed to load cards.'));
         }
     }
 );
@@ -21,7 +21,7 @@ export const addCard = createAsyncThunk(
             const response = await axiosClient.post('/cards', cardData);
             return response.data;
         } catch (error) {
-            return rejectWithValue(error.message);
+            return rejectWithValue(getApiErrorMessage(error, 'Failed to add card.'));
         }
     }
 );
@@ -34,7 +34,7 @@ export const getRecommendation = createAsyncThunk(
             const response = await axiosClient.post('/cards/recommendations', transactionContext);
             return response.data; // { bestOption: {}, alternatives: [], semanticContext: "" }
         } catch (error) {
-            return rejectWithValue(error.message);
+            return rejectWithValue(getApiErrorMessage(error, 'Recommendation failed.'));
         }
     }
 );

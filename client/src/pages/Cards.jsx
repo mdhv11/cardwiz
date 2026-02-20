@@ -33,7 +33,7 @@ import {
 } from '@mui/icons-material';
 import RewardCard from '../components/RewardCard';
 import { fetchCards, addCard } from '../store/slices/cardSlice';
-import axiosClient from '../api/axiosClient';
+import axiosClient, { getApiErrorMessage } from '../api/axiosClient';
 
 const SUPPORTED_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'];
 
@@ -174,8 +174,7 @@ const Cards = () => {
             });
             setCompareResult(response.data || null);
         } catch (error) {
-            const detail = error?.response?.data?.message || error?.response?.data?.detail || error?.message;
-            setCompareError(detail || 'Comparison failed. Please try again.');
+            setCompareError(getApiErrorMessage(error, 'Comparison failed. Please try again.'));
         } finally {
             setCompareLoading(false);
         }
@@ -262,11 +261,10 @@ const Cards = () => {
                 void pollDocumentJob(documentId, targetCardId);
             }
         } catch (error) {
-            const detail = error?.response?.data?.message || error?.response?.data?.detail || error?.message;
             setToast({
                 open: true,
                 severity: 'error',
-                message: detail || 'Failed to upload card document.'
+                message: getApiErrorMessage(error, 'Failed to upload card document.')
             });
         } finally {
             setUploadingCardId(null);

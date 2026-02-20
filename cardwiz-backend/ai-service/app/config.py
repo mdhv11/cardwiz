@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_TTL_SECONDS: int = 600
+    AI_RATE_LIMIT_ENABLED: bool = True
+    AI_RATE_LIMIT_WINDOW_SECONDS: int = 60
+    AI_RATE_LIMIT_RECOMMEND_PER_WINDOW: int = 20
+    AI_RATE_LIMIT_STATEMENT_PER_WINDOW: int = 6
+    AI_RATE_LIMIT_DOCUMENT_PER_WINDOW: int = 10
 
     # Embedding model config
     EMBEDDING_PRIMARY_MODEL_ID: str = "amazon.nova-2-multimodal-embeddings-v1:0"

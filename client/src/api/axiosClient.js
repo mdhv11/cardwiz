@@ -10,6 +10,38 @@ const axiosClient = axios.create({
     },
 });
 
+const parseRetryAfterSeconds = (value) => {
+    if (!value) return null;
+    const asNumber = Number(value);
+    if (!Number.isNaN(asNumber) && Number.isFinite(asNumber) && asNumber >= 0) {
+        return Math.round(asNumber);
+    }
+    const asDate = new Date(value);
+    if (Number.isNaN(asDate.getTime())) {
+        return null;
+    }
+    const deltaSeconds = Math.ceil((asDate.getTime() - Date.now()) / 1000);
+    return deltaSeconds > 0 ? deltaSeconds : 0;
+};
+
+export const getApiErrorMessage = (error, fallback = 'Something went wrong. Please try again.') => {
+    const status = error?.response?.status;
+    if (status === 429) {
+        const retryAfterHeader = error?.response?.headers?.['retry-after'];
+        const retryAfterSeconds = parseRetryAfterSeconds(retryAfterHeader);
+        if (retryAfterSeconds !== null) {
+            return `Too many requests. Please try again in ${retryAfterSeconds} seconds.`;
+        }
+        return 'Too many requests. Please try again shortly.';
+    }
+    return (
+        error?.response?.data?.message
+        || error?.response?.data?.detail
+        || error?.message
+        || fallback
+    );
+};
+
 // Request Interceptor: Attach JWT token to every request
 axiosClient.interceptors.request.use(
     (config) => {
@@ -36,6 +68,9 @@ axiosClient.interceptors.response.use(
             localStorage.removeItem('token');
             // Ideally redirect to login or dispatch a logout action
             // window.location.href = '/login'; // Simple redirect, or use a custom event
+        }
+        if (response && response.status === 429) {
+            error.userMessage = getApiErrorMessage(error, 'Too many requests. Please try again shortly.');
         }
         return Promise.reject(error);
     }

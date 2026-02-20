@@ -1,8 +1,10 @@
 package com.cardwiz.userservice.config;
 
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
@@ -21,6 +23,8 @@ import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.time.Duration;
 
 @Configuration
@@ -28,7 +32,7 @@ import java.time.Duration;
 public class CacheConfig {
     private static final Logger log = LoggerFactory.getLogger(CacheConfig.class);
     // Changing this prefix forces the app to ignore old broken cache keys
-    private static final String CACHE_KEY_PREFIX_VERSION = "v3";
+    private static final String CACHE_KEY_PREFIX_VERSION = "v4";
 
     @Bean
     public RedisCacheManagerBuilderCustomizer redisCacheManagerBuilderCustomizer() {
@@ -86,6 +90,7 @@ public class CacheConfig {
      */
     static class SafeRedisValueSerializer implements RedisSerializer<Object> {
         private final GenericJackson2JsonRedisSerializer delegate;
+        private final ObjectMapper fallbackMapper;
 
         public SafeRedisValueSerializer() {
             ObjectMapper objectMapper = new ObjectMapper();
@@ -106,6 +111,7 @@ public class CacheConfig {
             );
 
             this.delegate = new GenericJackson2JsonRedisSerializer(objectMapper);
+            this.fallbackMapper = objectMapper;
         }
 
         @Override
@@ -123,10 +129,54 @@ public class CacheConfig {
             try {
                 return delegate.deserialize(bytes);
             } catch (Exception ex) {
-                // This prevents the 500 Error loop. If Redis data is bad, we just ignore it.
+                // Backward compatibility: old entries may be arrays of typed objects without root type metadata.
+                Object recovered = tryRecoverLegacyPayload(bytes);
+                if (recovered != null) {
+                    return recovered;
+                }
+                // If payload is truly unreadable, treat as cache miss.
                 log.warn("Unreadable Redis payload found. Treating as Cache Miss. Error: {}", ex.getMessage());
                 return null;
             }
+        }
+
+        private Object tryRecoverLegacyPayload(byte[] bytes) {
+            if (bytes == null || bytes.length == 0) {
+                return null;
+            }
+            try {
+                JsonNode root = fallbackMapper.readTree(bytes);
+                if (root == null || root.isNull()) {
+                    return null;
+                }
+                return recoverNode(root);
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+
+        private Object recoverNode(JsonNode node) throws Exception {
+            if (node == null || node.isNull()) {
+                return null;
+            }
+
+            if (node.isArray()) {
+                List<Object> values = new ArrayList<>();
+                for (JsonNode child : node) {
+                    values.add(recoverNode(child));
+                }
+                return values;
+            }
+
+            if (node.isObject() && node.has("@class") && node.get("@class").isTextual()) {
+                String className = node.get("@class").asText();
+                Class<?> targetClass = Class.forName(className);
+                JsonNode copy = node.deepCopy();
+                ((ObjectNode) copy).remove("@class");
+                return fallbackMapper.treeToValue(copy, targetClass);
+            }
+
+            return fallbackMapper.treeToValue(node, Object.class);
         }
     }
 }

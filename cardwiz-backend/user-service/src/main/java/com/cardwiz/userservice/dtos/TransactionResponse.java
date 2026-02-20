@@ -17,5 +17,6 @@ public class TransactionResponse {
     private LocalDate transactionDate;
     private Long suggestedCardId;
     private Long actualCardId;
+    private BigDecimal potentialSavings;
     private String validationStatus;
 }

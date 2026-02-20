@@ -15,7 +15,16 @@ def init_db():
     try:
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception as exc:
+        logger.warning("Vector extension ensure failed: %s", exc)
+
+    try:
         Base.metadata.create_all(bind=engine)
+    except Exception as exc:
+        logger.warning("Metadata create_all failed: %s", exc)
+        return
+
+    try:
         with engine.begin() as connection:
             connection.execute(
                 text(
@@ -24,4 +33,4 @@ def init_db():
                 )
             )
     except Exception as exc:
-        logger.warning("Database initialization skipped: %s", exc)
+        logger.warning("FTS index creation skipped: %s", exc)

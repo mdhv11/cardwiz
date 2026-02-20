@@ -90,6 +90,67 @@ const SmartAdvisor = ({
         );
     };
 
+    const renderRecommendationCard = (payload) => {
+        const currency = payload?.currency || selectedCurrency;
+        const rows = Array.isArray(payload?.comparisonTable) ? payload.comparisonTable : [];
+        const topRows = rows.slice(0, 4);
+        const reasoning = Array.isArray(payload?.reasoning) ? payload.reasoning.filter(Boolean) : [];
+
+        return (
+            <Box sx={{ minWidth: 320, maxWidth: 640 }}>
+                <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    Recommended Card
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {payload?.bestCardName || 'Best option found'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    Spend: {currency} {Number(payload?.spendAmount ?? 0).toLocaleString()}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                    Estimated rewards: {currency} {Number(payload?.estimatedReward ?? 0).toFixed(2)} ({Number(payload?.effectivePercentage ?? 0).toFixed(2)}%)
+                </Typography>
+                {reasoning.length > 0 && (
+                    <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
+                        Why this card: {reasoning.join(' | ')}
+                    </Typography>
+                )}
+                {payload?.warning && (
+                    <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 1 }}>
+                        {payload.warning}
+                    </Typography>
+                )}
+                {topRows.length > 0 && (
+                    <Box sx={{ borderTop: '1px solid rgba(255, 255, 255, 0.12)', pt: 0.75 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                            Card Comparison
+                        </Typography>
+                        {topRows.map((row, idx) => (
+                            <Box
+                                key={`${row?.card_name || row?.cardName || 'card'}-${idx}`}
+                                sx={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '1.6fr 0.8fr 0.8fr',
+                                    gap: 1,
+                                    py: 0.35,
+                                    borderBottom: idx !== topRows.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
+                                }}
+                            >
+                                <Typography variant="caption">{row?.card_name || row?.cardName || 'Card'}</Typography>
+                                <Typography variant="caption" sx={{ textAlign: 'right' }}>
+                                    {Number(row?.effective_percentage ?? row?.effectivePercentage ?? 0).toFixed(2)}%
+                                </Typography>
+                                <Typography variant="caption" sx={{ textAlign: 'right' }}>
+                                    {currency} {Number(row?.estimated_value ?? row?.estimatedValue ?? 0).toFixed(2)}
+                                </Typography>
+                            </Box>
+                        ))}
+                    </Box>
+                )}
+            </Box>
+        );
+    };
+
     const handleSend = () => {
         if (input.trim()) {
             onSendMessage(input, { currency: selectedCurrency });
@@ -207,7 +268,9 @@ const SmartAdvisor = ({
                                         !!expandedReports[index],
                                         () => toggleReport(index)
                                     )
-                                    : <Typography variant="body2">{msg.text}</Typography>}
+                                    : msg?.type === 'recommendation-result'
+                                        ? renderRecommendationCard(msg.payload)
+                                        : <Typography variant="body2">{msg.text}</Typography>}
                             </Paper>
                         </Box>
                     </ListItem>

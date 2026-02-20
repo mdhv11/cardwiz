@@ -48,6 +48,23 @@ const Dashboard = () => {
             .slice(0, 5);
     }, [recentValidations]);
 
+    const latestValidation = useMemo(() => {
+        if (lastValidationResult?.transaction) {
+            return lastValidationResult.transaction;
+        }
+        return sortedValidations[0] || null;
+    }, [lastValidationResult, sortedValidations]);
+
+    const cardNameById = useMemo(() => {
+        const map = new Map();
+        cards.forEach((card) => {
+            if (card?.id !== null && card?.id !== undefined) {
+                map.set(Number(card.id), card.cardName || `Card ${card.id}`);
+            }
+        });
+        return map;
+    }, [cards]);
+
     const formatAmount = (amount, currency) => {
         if (amount === null || amount === undefined || amount === '') {
             return `${currency || 'INR'} 0`;
@@ -72,6 +89,13 @@ const Dashboard = () => {
         return 'default';
     };
 
+    const resolveCardLabel = (cardId, fallback) => {
+        if (cardId === null || cardId === undefined || cardId === '') {
+            return fallback;
+        }
+        return cardNameById.get(Number(cardId)) || `${fallback} #${cardId}`;
+    };
+
     return (
         <Box>
             <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -92,22 +116,43 @@ const Dashboard = () => {
                     Add Card
                 </Button>
             </Box>
-            {lastValidationResult?.recommendation && (
+            <Box sx={{ mb: 2 }}>
+                <Button
+                    variant="outlined"
+                    color="secondary"
+                    startIcon={<AddIcon />}
+                    onClick={() => setDialogOpen(true)}
+                >
+                    Add Validation
+                </Button>
+            </Box>
+            {latestValidation && (
                 <Paper sx={{ p: 2, mb: 3, border: '1px solid rgba(255,255,255,0.08)' }}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                         Latest Validation Processed
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                        Suggested card: {lastValidationResult.recommendation?.best_card?.name || lastValidationResult.recommendation?.bestOption?.cardName || 'Unknown'}
+                        Merchant: {latestValidation.merchant || 'Unknown merchant'}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        Routing: {lastValidationResult.recommendation?.routing_mode || 'N/A'} ({lastValidationResult.recommendation?.routing_reason || 'N/A'})
+                    <Typography variant="body2" color="text.secondary">
+                        Card used: {resolveCardLabel(latestValidation.actualCardId, 'Not selected')}
                     </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Suggested card: {resolveCardLabel(latestValidation.suggestedCardId, 'Best available option')}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                        {formatAmount(latestValidation.amount, latestValidation.currency)} on {latestValidation.transactionDate || 'recent date'}
+                    </Typography>
+                    {latestValidation.potentialSavings !== null && latestValidation.potentialSavings !== undefined && (
+                        <Typography variant="caption" color="secondary.main" sx={{ display: 'block', mt: 0.25 }}>
+                            Potential savings: {formatAmount(latestValidation.potentialSavings, latestValidation.currency)}
+                        </Typography>
+                    )}
                     <Box sx={{ mt: 1 }}>
                         <Chip
                             size="small"
-                            label={`Validation: ${resolveValidationStatus(lastValidationResult.transaction || {})}`}
-                            color={statusChipColor(resolveValidationStatus(lastValidationResult.transaction || {}))}
+                            label={`Validation: ${resolveValidationStatus(latestValidation)}`}
+                            color={statusChipColor(resolveValidationStatus(latestValidation))}
                         />
                     </Box>
                 </Paper>
@@ -173,7 +218,9 @@ const Dashboard = () => {
                 <Grid size={{ xs: 12, md: 4 }}>
                     <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Typography variant="h6">Recent Validations</Typography>
-                        <Button size="small" onClick={() => setDialogOpen(true)}>Add</Button>
+                        <Button size="small" variant="contained" color="secondary" onClick={() => setDialogOpen(true)}>
+                            Add Validation
+                        </Button>
                     </Box>
                     <Paper sx={{ p: 0, overflow: 'hidden' }}>
                         {sortedValidations.length === 0 && (
@@ -200,6 +247,12 @@ const Dashboard = () => {
                                     <Typography variant="caption" color="text.secondary">
                                         {item.transactionDate || 'Unknown date'}
                                     </Typography>
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Used: {resolveCardLabel(item.actualCardId, 'Not selected')}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Suggested: {resolveCardLabel(item.suggestedCardId, 'Best available option')}
+                                    </Typography>
                                 </Box>
                                 <Box sx={{ textAlign: 'right' }}>
                                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
@@ -208,6 +261,11 @@ const Dashboard = () => {
                                     <Typography variant="caption" color="secondary.main">
                                         {(item.category || 'general').toUpperCase()}
                                     </Typography>
+                                    {item.potentialSavings !== null && item.potentialSavings !== undefined && (
+                                        <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
+                                            +{formatAmount(item.potentialSavings, item.currency)}
+                                        </Typography>
+                                    )}
                                     <Box sx={{ mt: 0.5 }}>
                                         <Chip
                                             size="small"

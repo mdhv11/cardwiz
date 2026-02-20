@@ -7,6 +7,8 @@ import com.cardwiz.userservice.models.AdvisorMessage;
 import com.cardwiz.userservice.models.User;
 import com.cardwiz.userservice.repositories.AdvisorMessageRepository;
 import com.cardwiz.userservice.repositories.UserRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -23,6 +25,7 @@ public class AdvisorHistoryService {
 
     private final AdvisorMessageRepository advisorMessageRepository;
     private final UserRepository userRepository;
+    private final ObjectMapper objectMapper;
 
     public List<AdvisorMessageResponse> getHistory(Long userId) {
         return advisorMessageRepository.findByUserIdOrderByCreatedAtAsc(userId).stream()
@@ -37,7 +40,10 @@ public class AdvisorHistoryService {
 
         String sender = normalizeSender(request.getSender());
         String text = request.getText() == null ? "" : request.getText().trim();
-        if (text.isEmpty()) {
+        String type = normalizeType(request.getType());
+        String payload = serializePayload(request.getPayload());
+        boolean hasStructuredPayload = type != null || payload != null;
+        if (text.isEmpty() && !hasStructuredPayload) {
             throw new IllegalArgumentException("Message text cannot be empty");
         }
 
@@ -46,6 +52,8 @@ public class AdvisorHistoryService {
                         .user(user)
                         .sender(sender)
                         .text(text)
+                        .messageType(type)
+                        .messagePayload(payload)
                         .build()
         );
 
@@ -65,11 +73,43 @@ public class AdvisorHistoryService {
         return sender;
     }
 
+    private String normalizeType(String rawType) {
+        if (rawType == null) {
+            return null;
+        }
+        String trimmed = rawType.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String serializePayload(JsonNode payload) {
+        if (payload == null || payload.isNull()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Invalid message payload");
+        }
+    }
+
+    private JsonNode deserializePayload(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(payload);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     private AdvisorMessageResponse toResponse(AdvisorMessage message) {
         return AdvisorMessageResponse.builder()
                 .id(message.getId())
                 .sender(message.getSender())
                 .text(message.getText())
+                .type(message.getMessageType())
+                .payload(deserializePayload(message.getMessagePayload()))
                 .createdAt(message.getCreatedAt())
                 .build();
     }

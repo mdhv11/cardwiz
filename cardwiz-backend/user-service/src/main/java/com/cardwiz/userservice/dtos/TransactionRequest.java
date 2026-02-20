@@ -18,4 +18,5 @@ public class TransactionRequest {
     private LocalDate transactionDate;
     private Long suggestedCardId;
     private Long actualCardId;
+    private BigDecimal potentialSavings;
 }

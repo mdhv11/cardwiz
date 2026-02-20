@@ -25,6 +25,7 @@ class EmbeddingService:
         self.stop_words = {
             "a", "an", "and", "at", "for", "from", "in", "is", "of", "on", "or", "the", "to", "with"
         }
+        self.index_version_cache_key = "embedding:index_version"
 
     def sanitize_text(self, text: str) -> str:
         normalized = re.sub(r"[^a-zA-Z0-9\s]", " ", text.lower())
@@ -35,6 +36,28 @@ class EmbeddingService:
     def _hash_key(prefix: str, raw: str) -> str:
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return f"{prefix}:{digest}"
+
+    def _get_index_version(self) -> int:
+        if not self.cache:
+            return 0
+        try:
+            raw = self.cache.get(self.index_version_cache_key)
+            return int(raw) if raw is not None else 0
+        except Exception:
+            return 0
+
+    def _bump_index_version(self) -> None:
+        if not self.cache:
+            return
+        try:
+            self.cache.incr(self.index_version_cache_key)
+        except Exception as exc:
+            logger.warning("Failed bumping embedding index version: %s", exc)
+
+    @staticmethod
+    def _is_missing_reward_rule_table(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "reward_rule_vectors" in message and "does not exist" in message
 
     def _build_embedding_payload(self, model_id: str, clean_text: str, embedding_purpose: str) -> dict:
         # Nova 2 Multimodal Embeddings (current schema)
@@ -156,6 +179,7 @@ class EmbeddingService:
                 )
             session.commit()
 
+        self._bump_index_version()
         return {"status": "SYNCED", "ruleId": rule_id}
 
     async def search_similar_rules(self, query_text: str, top_k: int | None = None):
@@ -165,12 +189,13 @@ class EmbeddingService:
 
         k = top_k or settings.VECTOR_TOP_K
         normalized_query = self.sanitize_text(query_text) or "general"
+        index_version = self._get_index_version()
         query_cache_key = self._hash_key(
             "embedding-lookup",
             (
                 f"{normalized_query}|{k}|"
                 f"{settings.HYBRID_VECTOR_WEIGHT:.4f}|{settings.HYBRID_KEYWORD_WEIGHT:.4f}|"
-                f"{settings.HYBRID_FTS_LANGUAGE}"
+                f"{settings.HYBRID_FTS_LANGUAGE}|v={index_version}"
             ),
         )
         if self.cache:
@@ -178,23 +203,32 @@ class EmbeddingService:
             if cached_rules:
                 return json.loads(cached_rules)
 
-        with SessionLocal() as session:
-            vector_score = (1.0 - RewardRuleVector.embedding.cosine_distance(query_embedding)).label("vector_score")
-            text_query = func.plainto_tsquery(settings.HYBRID_FTS_LANGUAGE, normalized_query)
-            text_score = func.ts_rank(
-                func.to_tsvector(settings.HYBRID_FTS_LANGUAGE, func.coalesce(RewardRuleVector.content_text, "")),
-                text_query,
-            ).label("text_score")
-            final_score = (
-                (vector_score * settings.HYBRID_VECTOR_WEIGHT)
-                + (text_score * settings.HYBRID_KEYWORD_WEIGHT)
-            ).label("final_score")
+        try:
+            with SessionLocal() as session:
+                vector_score = (1.0 - RewardRuleVector.embedding.cosine_distance(query_embedding)).label("vector_score")
+                text_query = func.plainto_tsquery(settings.HYBRID_FTS_LANGUAGE, normalized_query)
+                text_score = func.ts_rank(
+                    func.to_tsvector(settings.HYBRID_FTS_LANGUAGE, func.coalesce(RewardRuleVector.content_text, "")),
+                    text_query,
+                ).label("text_score")
+                final_score = (
+                    (vector_score * settings.HYBRID_VECTOR_WEIGHT)
+                    + (text_score * settings.HYBRID_KEYWORD_WEIGHT)
+                ).label("final_score")
 
-            rows = session.execute(
-                select(RewardRuleVector, vector_score, text_score, final_score)
-                .order_by(desc(final_score))
-                .limit(k)
-            ).all()
+                rows = session.execute(
+                    select(RewardRuleVector, vector_score, text_score, final_score)
+                    .order_by(desc(final_score))
+                    .limit(k)
+                ).all()
+        except Exception as exc:
+            if self._is_missing_reward_rule_table(exc):
+                logger.warning(
+                    "reward_rule_vectors table missing during hybrid search. "
+                    "Run startup init/migrations and ingest documents. Returning empty candidates."
+                )
+                return []
+            raise
 
         payload = [
             {
@@ -222,11 +256,20 @@ class EmbeddingService:
         if not normalized_ids:
             return set()
 
-        with SessionLocal() as session:
-            rows = session.execute(
-                select(RewardRuleVector.card_id)
-                .where(RewardRuleVector.card_id.in_(normalized_ids))
-                .distinct()
-            ).all()
+        try:
+            with SessionLocal() as session:
+                rows = session.execute(
+                    select(RewardRuleVector.card_id)
+                    .where(RewardRuleVector.card_id.in_(normalized_ids))
+                    .distinct()
+                ).all()
+        except Exception as exc:
+            if self._is_missing_reward_rule_table(exc):
+                logger.warning(
+                    "reward_rule_vectors table missing during coverage check. "
+                    "Returning empty coverage until ingestion/bootstrap completes."
+                )
+                return set()
+            raise
 
         return {int(row[0]) for row in rows if row and row[0] is not None}

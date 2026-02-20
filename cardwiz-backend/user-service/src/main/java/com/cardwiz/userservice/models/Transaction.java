@@ -31,6 +31,7 @@ public class Transaction {
 
     private Long suggestedCardId;   // AI recommendation
     private Long actualCardId;      // What user selected
+    private BigDecimal potentialSavings; // Additional rewards user could have earned by using suggested card
 
     @ManyToOne
     @JoinColumn(name = "user_id")

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text, Index, func
+from sqlalchemy import Column, Integer, Text, Index
 from sqlalchemy.ext.declarative import declarative_base
 from pgvector.sqlalchemy import Vector
 
@@ -6,9 +6,9 @@ Base = declarative_base()
 
 class RewardRuleVector(Base):
     __tablename__ = 'reward_rule_vectors'
-    
+
     id = Column(Integer, primary_key=True)
-    rule_id = Column(Integer, index=True) 
+    rule_id = Column(Integer, index=True)
     card_id = Column(Integer, index=True)
     content_text = Column(Text)
     # Using 1024 dimensions for Nova 2 Multimodal Embeddings
@@ -22,10 +22,5 @@ class RewardRuleVector(Base):
             postgresql_using='hnsw',
             postgresql_with={'m': 16, 'ef_construction': 64},
             postgresql_ops={'embedding': 'vector_cosine_ops'}
-        ),
-        Index(
-            "reward_rule_vector_fts_idx",
-            func.to_tsvector("english", content_text),
-            postgresql_using="gin",
         ),
     )

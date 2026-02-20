@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -19,7 +20,8 @@ class DocumentService:
         self.bedrock = get_bedrock_runtime_client()
         self.s3 = get_s3_client()
         self.model_id = "amazon.nova-pro-v1:0"
-        self.max_pdf_pages = 20
+        self.document_max_pdf_pages = max(1, settings.DOCUMENT_ANALYSIS_MAX_PDF_PAGES)
+        self.statement_max_pdf_pages = max(1, settings.STATEMENT_ANALYSIS_MAX_PDF_PAGES)
 
     def _extract_json_payload(self, output_text: str) -> str:
         text = output_text.strip()
@@ -52,8 +54,8 @@ class DocumentService:
 
         return kwargs
 
-    def _convert_pdf_to_png_images(self, document_bytes: bytes) -> list[bytes]:
-        pages = convert_from_bytes(document_bytes, first_page=1, last_page=self.max_pdf_pages, fmt="png")
+    def _convert_pdf_to_png_images(self, document_bytes: bytes, max_pages: int) -> list[bytes]:
+        pages = convert_from_bytes(document_bytes, first_page=1, last_page=max_pages, fmt="png")
         if not pages:
             raise ValueError("PDF conversion produced no pages.")
 
@@ -65,7 +67,7 @@ class DocumentService:
         return images
 
     def _build_image_content_blocks(
-        self, document_bytes: bytes, s3_key: str, content_type: str | None
+        self, document_bytes: bytes, s3_key: str, content_type: str | None, max_pdf_pages: int
     ) -> list[dict]:
         key_is_pdf = s3_key.lower().endswith(".pdf")
         mime_is_pdf = content_type == "application/pdf"
@@ -74,14 +76,36 @@ class DocumentService:
             logger.info(
                 "Detected PDF input for %s. Converting up to %s pages to PNG.",
                 s3_key,
-                self.max_pdf_pages,
+                max_pdf_pages,
             )
-            images = self._convert_pdf_to_png_images(document_bytes)
+            images = self._convert_pdf_to_png_images(document_bytes, max_pdf_pages)
             return [{"image": {"format": "png", "source": {"bytes": image}}} for image in images]
 
         return [{"image": {"format": "png", "source": {"bytes": document_bytes}}}]
 
-    def _repair_json_via_nova(self, malformed_text: str) -> str:
+    async def _converse_with_retry(self, message: dict) -> dict:
+        max_retries = max(0, settings.BEDROCK_CONVERSE_MAX_RETRIES)
+        backoff = max(0.1, float(settings.BEDROCK_CONVERSE_RETRY_BACKOFF_SECONDS))
+        last_exc = None
+        for attempt in range(max_retries + 1):
+            try:
+                return self.bedrock.converse(**self._build_converse_kwargs(message))
+            except Exception as exc:
+                last_exc = exc
+                if attempt >= max_retries:
+                    break
+                sleep_seconds = backoff * (2 ** attempt)
+                logger.warning(
+                    "Bedrock converse failed (attempt %s/%s). Retrying in %.1fs. Error=%s",
+                    attempt + 1,
+                    max_retries + 1,
+                    sleep_seconds,
+                    exc,
+                )
+                await asyncio.sleep(sleep_seconds)
+        raise last_exc
+
+    async def _repair_json_via_nova(self, malformed_text: str) -> str:
         repair_prompt = f"""
             You returned malformed JSON in the previous response.
             Fix the JSON so it is strictly valid and return ONLY the JSON object.
@@ -91,7 +115,7 @@ class DocumentService:
             {malformed_text}
             """
         repair_message = {"role": "user", "content": [{"text": repair_prompt}]}
-        repair_response = self.bedrock.converse(**self._build_converse_kwargs(repair_message))
+        repair_response = await self._converse_with_retry(repair_message)
         return repair_response["output"]["message"]["content"][0]["text"]
 
     async def analyze_document(self, s3_key: str, bucket: str | None, doc_id: int) -> NovaAnalysisResponse:
@@ -103,7 +127,12 @@ class DocumentService:
         content_type = s3_response.get("ContentType")
 
         # 2. Convert source bytes into one or more image content blocks for Nova input
-        image_content_blocks = self._build_image_content_blocks(source_bytes, s3_key, content_type)
+        image_content_blocks = self._build_image_content_blocks(
+            source_bytes,
+            s3_key,
+            content_type,
+            max_pdf_pages=self.document_max_pdf_pages,
+        )
 
         # 3. Prepare the multimodal request for Nova 2 Pro
         prompt = """
@@ -141,13 +170,13 @@ class DocumentService:
 
         # 4. Call Converse API and parse response JSON with retry-on-malformed-json
         try:
-            response = self.bedrock.converse(**self._build_converse_kwargs(message))
+            response = await self._converse_with_retry(message)
             output_text = response["output"]["message"]["content"][0]["text"]
             try:
                 data = self._parse_model_json(output_text)
             except JSONDecodeError:
                 logger.warning("Malformed JSON received from Nova. Requesting JSON repair retry.")
-                repaired_text = self._repair_json_via_nova(output_text)
+                repaired_text = await self._repair_json_via_nova(output_text)
                 data = self._parse_model_json(repaired_text)
 
             return NovaAnalysisResponse(
@@ -171,7 +200,12 @@ class DocumentService:
         s3_response = self.s3.get_object(Bucket=target_bucket, Key=s3_key)
         source_bytes = s3_response["Body"].read()
         content_type = s3_response.get("ContentType")
-        image_content_blocks = self._build_image_content_blocks(source_bytes, s3_key, content_type)
+        image_content_blocks = self._build_image_content_blocks(
+            source_bytes,
+            s3_key,
+            content_type,
+            max_pdf_pages=self.statement_max_pdf_pages,
+        )
 
         prompt = f"""
         This is a credit-card statement.
@@ -202,13 +236,13 @@ class DocumentService:
         }
 
         try:
-            response = self.bedrock.converse(**self._build_converse_kwargs(message))
+            response = await self._converse_with_retry(message)
             output_text = response["output"]["message"]["content"][0]["text"]
             try:
                 data = self._parse_model_json(output_text)
             except JSONDecodeError:
                 logger.warning("Malformed JSON for statement extraction. Requesting JSON repair retry.")
-                repaired_text = self._repair_json_via_nova(output_text)
+                repaired_text = await self._repair_json_via_nova(output_text)
                 data = self._parse_model_json(repaired_text)
 
             parsed = StatementTransactionsResponse(**data)

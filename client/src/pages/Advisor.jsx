@@ -43,7 +43,12 @@ const Advisor = () => {
             return;
         }
         try {
-            await axiosClient.post('/advisor/history', { sender: 'bot', text: fallbackText });
+            await axiosClient.post('/advisor/history', {
+                sender: 'bot',
+                text: fallbackText,
+                type,
+                payload
+            });
         } catch (_) {
             // Keep chat responsive even if history persistence fails.
         }
@@ -131,7 +136,7 @@ const Advisor = () => {
         return merged;
     };
 
-    const formatRecommendationMessage = (payload) => {
+    const buildRecommendationMessage = (payload) => {
         const richBest = payload?.best_card;
         if (richBest?.name && richBest?.rewards) {
             const tx = payload?.transaction_context || {};
@@ -140,35 +145,51 @@ const Advisor = () => {
             const rewardValue = Number(richBest.rewards.estimated_value ?? 0);
             const effectivePct = Number(richBest.rewards.effective_percentage ?? 0);
             const reasoning = Array.isArray(richBest.reasoning) ? richBest.reasoning.filter(Boolean) : [];
-            const reasons = reasoning.length > 0 ? `Why: ${reasoning.join(' | ')}` : '';
             const warning = richBest.warning ? `Warning: ${richBest.warning}` : '';
 
             const comparisonRows = Array.isArray(payload?.comparison_table) ? payload.comparison_table : [];
-            const comparisonText = comparisonRows.length > 0
-                ? `VS: ${comparisonRows
-                    .map((row) => `${row.card_name} (${Number(row.effective_percentage ?? 0).toFixed(2)}%, ${currency} ${Number(row.estimated_value ?? 0).toFixed(2)})`)
-                    .join(' | ')}`
-                : '';
+            const summaryLines = [
+                `Best card: ${richBest.name}`,
+                `Estimated rewards: ${currency} ${rewardValue.toFixed(2)} on ${currency} ${Number(spendAmount).toLocaleString()} spend (${effectivePct.toFixed(2)}%)`
+            ];
+            if (reasoning.length > 0) {
+                summaryLines.push(`Why this card: ${reasoning.join(' | ')}`);
+            }
+            if (warning) {
+                summaryLines.push(warning);
+            }
 
-            return [
-                `Best card: ${richBest.name}.`,
-                `For ${currency} ${Number(spendAmount).toLocaleString()} spend, estimated rewards: ${currency} ${rewardValue.toFixed(2)} (${effectivePct.toFixed(2)}%).`,
-                richBest.calculation_logic ? `Calc: ${richBest.calculation_logic}` : '',
-                reasons,
-                warning,
-                comparisonText
-            ]
-                .filter(Boolean)
-                .join(' ');
+            return {
+                type: 'recommendation-result',
+                payload: {
+                    currency,
+                    bestCardName: richBest.name,
+                    spendAmount: Number(spendAmount),
+                    estimatedReward: rewardValue,
+                    effectivePercentage: effectivePct,
+                    reasoning,
+                    warning: richBest.warning || null,
+                    comparisonTable: comparisonRows
+                },
+                fallbackText: summaryLines.join('. ') + '.'
+            };
         }
 
         const recommendation = payload?.bestOption;
         if (!recommendation) {
-            return 'I could not find a recommendation right now. Please try again.';
+            return {
+                type: null,
+                payload: null,
+                fallbackText: 'I could not find a recommendation right now. Please try again.'
+            };
         }
         const reward = recommendation.estimatedReward || 'No reward details available';
         const reason = recommendation.reasoning || 'No reasoning available';
-        return `Best card: ${recommendation.cardName}. Reward: ${reward}. Why: ${reason}`;
+        return {
+            type: null,
+            payload: null,
+            fallbackText: `Best card: ${recommendation.cardName}. Reward: ${reward}. Why: ${reason}`
+        };
     };
 
     const formatMissedSavingsSummary = (payload) => {
@@ -215,7 +236,12 @@ const Advisor = () => {
             try {
                 const payload = parseRecommendationInput(mergedText, options.currency || selectedCurrency);
                 const response = await axiosClient.post('/cards/recommendations', payload);
-                await pushBotMessage(formatRecommendationMessage(response.data));
+                const message = buildRecommendationMessage(response.data);
+                if (message.type) {
+                    await pushBotStructuredMessage(message.type, message.payload, message.fallbackText);
+                } else {
+                    await pushBotMessage(message.fallbackText);
+                }
             } catch (error) {
                 await pushBotMessage(extractErrorMessage(error, 'Recommendation failed. Please try again in a moment.'));
             } finally {
@@ -236,7 +262,12 @@ const Advisor = () => {
         try {
             const payload = parseRecommendationInput(text, options.currency || selectedCurrency);
             const response = await axiosClient.post('/cards/recommendations', payload);
-            await pushBotMessage(formatRecommendationMessage(response.data));
+            const message = buildRecommendationMessage(response.data);
+            if (message.type) {
+                await pushBotStructuredMessage(message.type, message.payload, message.fallbackText);
+            } else {
+                await pushBotMessage(message.fallbackText);
+            }
         } catch (error) {
             await pushBotMessage(extractErrorMessage(error, 'Recommendation failed. Please try again in a moment.'));
         } finally {
@@ -356,7 +387,12 @@ const Advisor = () => {
                 const response = await axiosClient.get('/advisor/history');
                 const history = Array.isArray(response.data) ? response.data : [];
                 if (history.length > 0) {
-                    setMessages(history.map((entry) => ({ sender: entry.sender, text: entry.text })));
+                    setMessages(history.map((entry) => ({
+                        sender: entry.sender,
+                        text: entry.text,
+                        type: entry.type || undefined,
+                        payload: entry.payload || undefined
+                    })));
                 } else {
                     setMessages([{ sender: 'bot', text: defaultWelcomeMessage }]);
                     try {

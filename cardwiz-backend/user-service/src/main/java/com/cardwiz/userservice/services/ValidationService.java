@@ -11,6 +11,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
@@ -52,6 +54,7 @@ public class ValidationService {
 
         RecommendationDTO recommendation = aiServiceClient.getRecommendation(recRequest);
         Long suggestedCardId = extractSuggestedCardId(recommendation);
+        BigDecimal potentialSavings = estimatePotentialSavings(recommendation, request.getActualCardId());
 
         TransactionResponse transaction = transactionService.createTransaction(
                 userId,
@@ -62,7 +65,8 @@ public class ValidationService {
                         normalizeCurrency(request.getCurrency()),
                         request.getTransactionDate() != null ? request.getTransactionDate() : LocalDate.now(),
                         suggestedCardId,
-                        request.getActualCardId()
+                        request.getActualCardId(),
+                        potentialSavings
                 )
         );
 
@@ -92,6 +96,39 @@ public class ValidationService {
             return recommendation.getBestOption().getCardId();
         }
         return null;
+    }
+
+    private BigDecimal estimatePotentialSavings(RecommendationDTO recommendation, Long actualCardId) {
+        if (recommendation == null || actualCardId == null) {
+            return null;
+        }
+
+        Double optimalRewardValue = recommendation.getBestCard() != null
+                && recommendation.getBestCard().getRewards() != null
+                ? recommendation.getBestCard().getRewards().getEstimatedValue()
+                : null;
+        if (optimalRewardValue == null) {
+            return null;
+        }
+
+        Double actualRewardValue = null;
+        if (recommendation.getBestCard() != null && actualCardId.equals(recommendation.getBestCard().getId())) {
+            actualRewardValue = optimalRewardValue;
+        } else if (recommendation.getComparisonTable() != null) {
+            actualRewardValue = recommendation.getComparisonTable().stream()
+                    .filter(row -> row != null && row.getCardId() != null && actualCardId.equals(row.getCardId()))
+                    .map(RecommendationDTO.ComparisonRow::getEstimatedValue)
+                    .filter(value -> value != null)
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        if (actualRewardValue == null) {
+            return null;
+        }
+
+        double delta = Math.max(0.0, optimalRewardValue - actualRewardValue);
+        return BigDecimal.valueOf(delta).setScale(2, RoundingMode.HALF_UP);
     }
 
     private String mergeContextNotes(String requestContext, String historyContext) {

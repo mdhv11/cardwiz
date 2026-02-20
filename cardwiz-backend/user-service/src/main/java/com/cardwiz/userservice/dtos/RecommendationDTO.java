@@ -89,6 +89,8 @@ public class RecommendationDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ComparisonRow {
+        @JsonProperty("card_id")
+        private Long cardId;
         @JsonProperty("card_name")
         private String cardName;
         @JsonProperty("effective_percentage")

@@ -50,6 +50,7 @@ public class TransactionService {
                 .transactionDate(request.getTransactionDate())
                 .suggestedCardId(request.getSuggestedCardId())
                 .actualCardId(request.getActualCardId())
+                .potentialSavings(request.getPotentialSavings())
                 .user(user)
                 .build();
 
@@ -86,6 +87,9 @@ public class TransactionService {
         if (request.getActualCardId() != null) {
             tx.setActualCardId(request.getActualCardId());
         }
+        if (request.getPotentialSavings() != null) {
+            tx.setPotentialSavings(request.getPotentialSavings());
+        }
 
         return toResponse(transactionRepository.save(tx));
     }
@@ -112,6 +116,7 @@ public class TransactionService {
                 .transactionDate(tx.getTransactionDate())
                 .suggestedCardId(tx.getSuggestedCardId())
                 .actualCardId(tx.getActualCardId())
+                .potentialSavings(tx.getPotentialSavings())
                 .validationStatus(validationStatus)
                 .build();
     }

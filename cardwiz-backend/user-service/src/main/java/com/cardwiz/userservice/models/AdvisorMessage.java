@@ -28,6 +28,12 @@ public class AdvisorMessage {
     @Column(nullable = false, length = 4000)
     private String text;
 
+    @Column(length = 64)
+    private String messageType;
+
+    @Column(columnDefinition = "TEXT")
+    private String messagePayload;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

@@ -142,7 +142,8 @@ Execution requirements:
    - reward_rate = effective_reward_percentage
    - reward_mode = "PERCENTAGE"
 3. Choose the card with highest computed reward value.
-4. Mention tool usage clearly in calculation_logic/reasoning.
+4. Keep user-facing wording simple and non-technical.
+5. Do not mention internal tools, function names, APIs, or routing details in calculation_logic/reasoning.
 
 Return STRICT JSON only:
 {{

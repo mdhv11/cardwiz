@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Nova Config
     NOVA_ENABLE_REASONING: bool = False
     NOVA_REASONING_BUDGET_TOKENS: int = 1024
+    DOCUMENT_ANALYSIS_MAX_PDF_PAGES: int = 12
+    STATEMENT_ANALYSIS_MAX_PDF_PAGES: int = 20
+    BEDROCK_CONVERSE_MAX_RETRIES: int = 2
+    BEDROCK_CONVERSE_RETRY_BACKOFF_SECONDS: float = 1.5
 
     # Database Config
     # Default to localhost, but allow override via env var
@@ -70,7 +74,7 @@ class Settings(BaseSettings):
     KAFKA_DOCUMENT_INGEST_TOPIC: str = "cardwiz.document.ingest"
     KAFKA_CONSUMER_GROUP: str = "ai-service-doc-ingest"
     KAFKA_AUTO_OFFSET_RESET: str = "latest"
-    KAFKA_MAX_POLL_INTERVAL_MS: int = 900000
+    KAFKA_MAX_POLL_INTERVAL_MS: int = 1800000
     KAFKA_SESSION_TIMEOUT_MS: int = 45000
     KAFKA_HEARTBEAT_INTERVAL_MS: int = 15000
 
